@@ -54,19 +54,21 @@ sealed inventory in `vendor/SHA256SUMS`.
 
 ## Build and test
 
+The `check` job in `.github/workflows/ci.yml` is the source of truth for the
+package list. Each gate takes one or more `-p` flags:
+
 ```sh
-cargo fmt --all -- --check
-cargo clippy --workspace --all-targets --no-deps -- -D warnings
-cargo test --workspace --all-targets
-cargo test --workspace --doc
-cargo doc --workspace --no-deps
+cargo fmt -p neotales-dbapi -p neotales-migration -- --check
+cargo clippy -p neotales-dbapi --all-targets --no-deps -- -D warnings
+cargo test -p neotales-dbapi --all-targets
+eng/test-doctests.sh all
+cargo doc -p neotales-dbapi --no-deps
 ```
 
-The PostgreSQL provider and its TLS adapter are left out of the plain
-`cargo test` pass because their non-ignored tests connect to a real server. The
-CI `check` job runs every fixture-free package by name; live lanes start their
-own pinned containers. See [RELEASE.md](RELEASE.md) and the workflow for the
-full list.
+CI names every fixture-free package explicitly instead of passing
+`--workspace`. A workspace-wide test would also run the PostgreSQL server tests
+without their fixture, and would compile the vendored quiet roots' own test
+targets. The live lanes start their own pinned containers.
 
 ## Backend integration tests
 
@@ -86,7 +88,7 @@ excluded from the `neotales-dbapi-d1` package.
 ## Publish order
 
 All publishable crates share one version and one tag. Publish in dependency
-order: the three transport forks first, then `neotales-dbapi` and
+order: the transport forks first, then `neotales-dbapi` and
 `neotales-migration`, then the providers, then the migration backends.
 `RELEASE.md` has the exact list and the first-publish procedure.
 
