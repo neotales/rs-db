@@ -1,0 +1,31 @@
+[package]
+name = "neotales-dbapi"
+description = "Driver-neutral SQL execution with asynchronous and synchronous row access"
+version = "0.0.0-alpha.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+readme = "README.md"
+keywords = ["sql", "database", "async", "blocking"]
+categories = ["database"]
+
+[features]
+default = []
+# The blocking adapter owns dedicated worker threads and therefore needs a runtime. The
+# synchronous traits in `sync` and the asynchronous contract itself do not.
+blocking = ["dep:tokio"]
+
+[dependencies]
+futures-core.workspace = true
+neotales-resilience.workspace = true
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+tokio = { workspace = true, features = ["net", "rt", "sync", "time"], optional = true }
+
+[dev-dependencies]
+futures-util.workspace = true
+
+[lints]
+workspace = true

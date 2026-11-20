@@ -1,0 +1,18 @@
+[package]
+name = "d1-emulator-worker"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[workspace]
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+futures-core = "0.3"
+neotales-dbapi = { path = "../../../dbapi" }
+neotales-dbapi-d1 = { path = "../.." }
+worker = { version = "=0.9.0", default-features = false, features = ["d1"] }
+wasm-bindgen = "=0.2.130"
+wasm-bindgen-futures = "=0.4.80"

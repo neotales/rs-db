@@ -1,0 +1,3 @@
+# Preserve upstream archive whitespace (including license EOFs) rather than
+# mixing a wholesale vendor reformat into the reproducible quiet-source delta.
+vendor/** -whitespace

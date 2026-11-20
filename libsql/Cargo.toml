@@ -1,0 +1,64 @@
+[package]
+name = "neotales-libsql"
+version = "0.0.0-alpha.0"
+edition = "2021"
+authors = ["the libSQL authors"]
+license = "MIT"
+repository = "https://github.com/neotales/rs-db"
+description = "Remote-only libSQL transport fork used by neotales-dbapi-libsql"
+
+[lib]
+name = "libsql"
+path = "src/lib.rs"
+
+[features]
+default = ["remote", "tls"]
+remote = ["hrana"]
+hrana = ["parser", "serde", "stream"]
+parser = []
+serde = []
+stream = []
+tls = []
+
+[dependencies]
+async-stream = "0.3.5"
+async-trait = "0.1"
+base64 = "0.21"
+bitflags = "2.4"
+bytes = { version = "1", features = ["serde"] }
+fallible-iterator = "0.3"
+futures = "0.3"
+http = "1"
+http-body-util = "0.1"
+hyper = { version = "1", features = ["client", "http1"] }
+hyper-rustls = { version = "0.27", default-features = false, features = ["native-tokio", "http1", "tls12"] }
+hyper-util = { version = "0.1", features = ["client-legacy", "http1", "tokio"] }
+libsql-hrana = "0.10.0"
+rustls = { version = "=0.23.46", default-features = false, features = ["ring", "std", "tls12"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["float_roundtrip"] }
+sqlite3-parser = { package = "libsql-sqlite3-parser", version = "0.13" }
+thiserror = "1"
+tokio = { version = "1", features = ["sync"] }
+tokio-util = { version = "0.7", features = ["io-util", "codec"] }
+tower = { version = "0.4", features = ["util"] }
+tracing = { version = "0.1", default-features = false }
+url = "2"
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(feature, values("core", "replication", "sync", "wasm", "cloudflare", "encryption"))'] }
+
+[dev-dependencies]
+rcgen = { version = "=0.14.10", default-features = false, features = ["crypto", "ring"] }
+# Deliberately unify both providers: downstream workspaces may enable either.
+# TLS tests must exercise that graph even when this package is tested alone.
+rustls = { version = "=0.23.46", default-features = false, features = ["aws_lc_rs"] }
+tempfile = "3"
+tokio = { version = "1", features = ["macros", "net", "rt", "time", "io-util"] }
+tokio-rustls = { version = "0.26", default-features = false, features = ["tls12"] }
+tracing-subscriber = "0.3"
+
+# These packages are imported forks. Their lint policy is upstream: they do
+# not inherit the workspace groups, and adding pedantic lints here would edit
+# vendored code. An empty table records that intent for Cargo.
+[lints]

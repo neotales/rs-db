@@ -1,0 +1,29 @@
+[package]
+name = "neotales-dbapi-d1"
+description = "Experimental uncertain writes and requery paging over Cloudflare D1; DBAPI operations fail closed"
+version = "0.0.0-alpha.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+keywords = ["sql", "database", "cloudflare", "d1", "wasm"]
+categories = ["database"]
+exclude = ["emulator/**"]
+
+[dependencies]
+neotales-dbapi = { path = "../dbapi", version = "=0.0.0-alpha.0" }
+futures-core.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+worker = { version = "=0.9.0", default-features = false, features = ["d1"] }
+
+[target.'cfg(target_arch = "wasm32")'.dev-dependencies]
+serde-wasm-bindgen = "=0.6.5"
+wasm-bindgen-test = "=0.3.80"
+
+[lints]
+workspace = true

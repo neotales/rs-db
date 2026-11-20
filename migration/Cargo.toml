@@ -1,0 +1,22 @@
+[package]
+name = "neotales-migration"
+description = "Driver-free validated SQL migration planning and orchestration"
+version = "0.0.0-alpha.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+readme = "README.md"
+keywords = ["sql", "migration", "checksum"]
+categories = ["database"]
+
+[dependencies]
+sha2 = "0.10"
+futures-util = "0.3"
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt", "macros"] }
+
+[lints]
+workspace = true

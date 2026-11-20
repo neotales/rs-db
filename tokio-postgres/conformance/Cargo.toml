@@ -1,0 +1,89 @@
+[package]
+name = "neotales-tokio-postgres-conformance"
+description = "Runs the unmodified upstream tokio-postgres 0.7.18 tests against the quiet fork."
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.98"
+publish = false
+
+# A detached workspace: this harness must not join rs/lib's workspace, because
+# `cargo test --workspace` there has no disposable PostgreSQL fixture.
+[workspace]
+
+[dev-dependencies]
+# The rename is deliberate. It lets the upstream tests keep their `tokio_postgres`
+# spelling, and it makes the fork's package the only crate behind that name. Test
+# targets are the only consumers, so this belongs in dev-dependencies.
+tokio-postgres = { package = "neotales-tokio-postgres", path = "..", default-features = false }
+bytes = "1.11"
+futures-channel = { version = "0.3", features = ["sink"] }
+futures-util = { version = "0.3", default-features = false, features = ["async-await-macro"] }
+pin-project-lite = "0.2.11"
+postgres-types = "0.2.14"
+tokio = { version = "1.27", features = ["macros", "net", "rt", "rt-multi-thread", "time"] }
+
+bit-vec-06 = { package = "bit-vec", version = "0.6" }
+bit-vec-07 = { package = "bit-vec", version = "0.7" }
+bit-vec-08 = { package = "bit-vec", version = "0.8" }
+bit-vec-09 = { package = "bit-vec", version = "0.9" }
+chrono-04 = { package = "chrono", version = "0.4", default-features = false }
+eui48-1 = { package = "eui48", version = "1.0", default-features = false }
+geo-types-06 = { package = "geo-types", version = "0.6" }
+geo-types-07 = { package = "geo-types", version = "0.7" }
+jiff-01 = { package = "jiff", version = "0.1" }
+jiff-02 = { package = "jiff", version = "0.2" }
+serde_json-1 = { package = "serde_json", version = "1.0" }
+smol_str-01 = { package = "smol_str", version = "0.1" }
+time-02 = { package = "time", version = "0.2" }
+time-03 = { package = "time", version = "0.3", features = ["parsing"] }
+uuid-08 = { package = "uuid", version = "0.8" }
+uuid-1 = { package = "uuid", version = "1.0" }
+
+[features]
+# Mirror the fork's feature surface for the vendored upstream test cfgs.
+default = ["runtime"]
+runtime = ["tokio-postgres/runtime"]
+# Optional upstream feature. It adds one type test and needs no extra dependency.
+array-impls = ["tokio-postgres/array-impls"]
+
+with-bit-vec-0_6 = ["tokio-postgres/with-bit-vec-0_6"]
+with-bit-vec-0_7 = ["tokio-postgres/with-bit-vec-0_7"]
+with-bit-vec-0_8 = ["tokio-postgres/with-bit-vec-0_8"]
+with-bit-vec-0_9 = ["tokio-postgres/with-bit-vec-0_9"]
+with-chrono-0_4 = ["tokio-postgres/with-chrono-0_4"]
+with-eui48-1 = ["tokio-postgres/with-eui48-1"]
+with-geo-types-0_6 = ["tokio-postgres/with-geo-types-0_6"]
+with-geo-types-0_7 = ["tokio-postgres/with-geo-types-0_7"]
+with-jiff-0_1 = ["tokio-postgres/with-jiff-0_1"]
+with-jiff-0_2 = ["tokio-postgres/with-jiff-0_2"]
+with-serde_json-1 = ["tokio-postgres/with-serde_json-1"]
+with-smol_str-01 = ["tokio-postgres/with-smol_str-01"]
+with-time-0_2 = ["tokio-postgres/with-time-0_2"]
+with-time-0_3 = ["tokio-postgres/with-time-0_3"]
+with-uuid-0_8 = ["tokio-postgres/with-uuid-0_8"]
+with-uuid-1 = ["tokio-postgres/with-uuid-1"]
+with-cidr-0_2 = ["tokio-postgres/with-cidr-0_2"]
+with-cidr-0_3 = ["tokio-postgres/with-cidr-0_3"]
+with-eui48-0_4 = ["tokio-postgres/with-eui48-0_4"]
+js = ["tokio-postgres/js"]
+
+[[test]]
+name = "upstream"
+path = "tests/test/main.rs"
+
+[[test]]
+name = "fork_identity"
+path = "tests/fork_identity.rs"
+
+[lints.rust]
+# Known feature values used by the byte-identical vendored upstream tests.
+unexpected_cfgs = { level = "warn", check-cfg = [
+  'cfg(feature, values("with-bit-vec-0_6", "with-bit-vec-0_7", "with-bit-vec-0_8", "with-bit-vec-0_9", "with-chrono-0_4", "with-eui48-1", "with-geo-types-0_6", "with-geo-types-0_7", "with-jiff-0_1", "with-jiff-0_2", "with-serde_json-1", "with-smol_str-01", "with-time-0_2", "with-time-0_3", "with-uuid-0_8", "with-uuid-1"))',
+] }
+
+[lints.clippy]
+# `tests/test/` is byte-identical to upstream 0.7.18, which predates this lint.
+# Editing vendored test code to silence it would break the source hash and the
+# claim that the suite is unmodified. This is the only vendored-code lint seen
+# with the repository toolchain.
+extra_unused_lifetimes = "allow"

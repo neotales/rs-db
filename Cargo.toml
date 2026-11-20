@@ -1,0 +1,84 @@
+[workspace]
+resolver = "3"
+members = [
+  "dbapi",
+  "dbapi-clickhouse",
+  "dbapi-d1",
+  "dbapi-libsql",
+  "dbapi-mariadb",
+  "dbapi-mssql",
+  "dbapi-mssql-direct",
+  "dbapi-mysql",
+  "dbapi-postgres",
+  "dbapi-postgres-tls",
+  "dbapi-sqlite",
+  "dbapi-sqlite-direct",
+  "klickhouse",
+  "libsql",
+  "migration",
+  "migration-clickhouse",
+  "migration-libsql",
+  "migration-mariadb",
+  "migration-mssql",
+  "migration-mysql",
+  "migration-postgres",
+  "migration-sqlite",
+  "sqlx-mssql",
+  "tokio-postgres",
+]
+# Detached test fixtures and the vendored quiet forks are path dependencies or
+# host-side fixtures, not workspace members. Keeping them out of the workspace
+# means `--workspace` lints and documents the crates this repository ships,
+# while their own manifests still resolve from the paths that name them.
+exclude = [
+  "dbapi-d1/emulator/worker",
+  "dbapi-mssql-direct/vendor/mssql-tds-0.3.0",
+  "dbapi-mssql-direct/vendor/native-tls-0.2.18",
+  "dbapi-mssql-direct/vendor/tokio-native-tls-0.3.1",
+  "tokio-postgres/conformance",
+]
+
+[workspace.package]
+edition = "2024"
+rust-version = "1.100"
+license = "MIT"
+repository = "https://github.com/neotales/rs-db"
+authors = ["x0craft"]
+
+[workspace.dependencies]
+bytes = "1"
+futures-core = "0.3"
+futures-util = "0.3"
+getrandom = "0.3"
+neotales-resilience = "=0.0.0-alpha.0"
+rcgen = { version = "0.14.7", features = ["zeroize", "x509-parser"] }
+serde_json = "1.0"
+sha2 = "0.10"
+tempfile = "3.24"
+thiserror = "2.0"
+tokio = { version = "1.47", features = ["macros", "rt", "sync", "time"] }
+url = "2.5"
+# 1.9.1 redacts `Zeroizing`'s Debug output. neotales-keepass was tested against
+# 1.9.0, and its hand-written Debug impl exists because that version prints the
+# wrapped secret. Keep this pinned until that impl is revisited.
+zeroize = { version = "=1.9.0", features = ["derive"] }
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+missing_debug_implementations = "warn"
+unreachable_pub = "warn"
+
+[workspace.lints.rustdoc]
+broken_intra_doc_links = "warn"
+private_intra_doc_links = "warn"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+# Clippy 1.100 added `assert_is_empty`, which fires on the direct
+# `assert!(value.is_empty())` form used throughout the imported provider tests.
+# Rewriting dozens of assertions into equality checks against an empty value
+# would be a test-only change with no coverage gain, so the style lint is
+# allowed here. Remove this when those tests are next edited.
+assert_is_empty = "allow"

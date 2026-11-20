@@ -1,0 +1,37 @@
+[package]
+name = "neotales-dbapi-sqlite-direct"
+description = "SQLite provider for neotales-dbapi built directly on rusqlite"
+version = "0.0.0-alpha.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+readme = "README.md"
+keywords = ["sqlite", "database", "async", "blocking"]
+categories = ["database"]
+
+[features]
+# Compile the vendored SQLite source, so no system package or C library install is required.
+# Disable default features to link the platform's libsqlite3 instead.
+default = ["bundled"]
+bundled = ["rusqlite/bundled"]
+
+[dependencies]
+neotales-dbapi = { path = "../dbapi", version = "=0.0.0-alpha.0" }
+rusqlite = { version = "0.39", default-features = false, features = ["cache", "column_decltype", "hooks"] }
+tokio = { version = "1.47", default-features = false, features = ["sync"] }
+
+[dev-dependencies]
+futures-util.workspace = true
+neotales-dbapi = { path = "../dbapi", version = "=0.0.0-alpha.0", features = ["blocking"] }
+neotales-resilience.workspace = true
+rusqlite = { version = "0.39", default-features = false, features = ["cache", "column_decltype"] }
+tempfile.workspace = true
+tokio = { version = "1.47", features = ["macros", "rt-multi-thread", "time"] }
+log = "0.4"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["registry"] }
+
+[lints]
+workspace = true

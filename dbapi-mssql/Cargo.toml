@@ -1,0 +1,27 @@
+[package]
+name = "neotales-dbapi-mssql"
+description = "SQL Server provider for neotales-dbapi"
+version = "0.0.0-alpha.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+readme = "README.md"
+
+[dependencies]
+neotales-dbapi = { path = "../dbapi", version = "=0.0.0-alpha.0" }
+futures-util.workspace = true
+sqlx = { version = "0.9", default-features = false, features = ["runtime-tokio"] }
+sqlx-mssql-rs-core = { package = "neotales-sqlx-mssql", path = "../sqlx-mssql", version = "=0.0.0-alpha.0", default-features = false }
+tokio.workspace = true
+url.workspace = true
+zeroize.workspace = true
+
+[dev-dependencies]
+getrandom.workspace = true
+testcontainers = "=0.28.0"
+tokio = { workspace = true, features = ["io-util", "macros", "net", "rt-multi-thread", "time"] }
+
+[lints]
+workspace = true

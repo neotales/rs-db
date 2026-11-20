@@ -1,0 +1,30 @@
+[package]
+name = "neotales-migration-sqlite"
+description = "Transactional SQLite backend for neotales-migration"
+version = "0.0.0-alpha.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+readme = "README.md"
+
+[features]
+default = ["sqlx-compat"]
+sqlx-compat = ["dep:neotales-dbapi-sqlite"]
+
+[dependencies]
+neotales-migration = { path = "../migration", version = "=0.0.0-alpha.0" }
+neotales-dbapi = { path = "../dbapi", version = "=0.0.0-alpha.0" }
+neotales-dbapi-sqlite = { path = "../dbapi-sqlite", optional = true, version = "=0.0.0-alpha.0" }
+thiserror.workspace = true
+
+[dev-dependencies]
+neotales-dbapi-sqlite = { path = "../dbapi-sqlite", version = "=0.0.0-alpha.0" }
+neotales-dbapi-sqlite-direct = { path = "../dbapi-sqlite-direct", version = "=0.0.0-alpha.0" }
+tempfile = "3.24"
+sqlx = { version = "0.9", default-features = false, features = ["runtime-tokio", "sqlite"] }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }
+
+[lints]
+workspace = true

@@ -1,0 +1,25 @@
+[package]
+name = "neotales-migration-mariadb"
+description = "Explicit-recovery MariaDB migrations over neotales-dbapi"
+version = "0.0.0-alpha.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+readme = "README.md"
+
+[dependencies]
+neotales-dbapi = { path = "../dbapi", version = "=0.0.0-alpha.0" }
+neotales-dbapi-mariadb = { path = "../dbapi-mariadb", version = "=0.0.0-alpha.0" }
+neotales-migration = { path = "../migration", version = "=0.0.0-alpha.0" }
+sha2.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+getrandom.workspace = true
+testcontainers = "=0.28.0"
+tokio = { workspace = true, features = ["io-util", "macros", "net", "rt-multi-thread", "time"] }
+
+[lints]
+workspace = true

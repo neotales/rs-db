@@ -1,0 +1,31 @@
+[package]
+name = "neotales-dbapi-postgres"
+description = "PostgreSQL provider for neotales-dbapi"
+version = "0.0.0-alpha.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+readme = "README.md"
+exclude = ["PUBLISHING.md"]
+
+[dependencies]
+neotales-dbapi = { path = "../dbapi", version = "=0.0.0-alpha.0" }
+futures-util.workspace = true
+tokio.workspace = true
+neotales-tokio-postgres = { path = "../tokio-postgres", version = "=0.0.0-alpha.0" }
+neotales-dbapi-postgres-tls = { path = "../dbapi-postgres-tls", version = "=0.0.0-alpha.0" }
+
+[dev-dependencies]
+bytes.workspace = true
+getrandom.workspace = true
+testcontainers = "=0.28.0"
+tokio = { workspace = true, features = ["rt-multi-thread", "net", "io-util", "process"] }
+tokio-postgres = "0.7.18"
+log = "0.4"
+tracing = "0.1"
+tracing-subscriber = "0.3"
+
+[lints]
+workspace = true

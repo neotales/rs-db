@@ -1,0 +1,27 @@
+[package]
+name = "neotales-dbapi-sqlite"
+description = "SQLite provider for neotales-dbapi"
+version = "0.0.0-alpha.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+readme = "README.md"
+
+[dependencies]
+neotales-dbapi = { path = "../dbapi", version = "=0.0.0-alpha.0" }
+futures-util.workspace = true
+sqlx = { version = "0.9", default-features = false, features = ["runtime-tokio", "sqlite"] }
+
+[dev-dependencies]
+neotales-dbapi = { path = "../dbapi", version = "=0.0.0-alpha.0", features = ["blocking"] }
+neotales-resilience.workspace = true
+tempfile = "3.24"
+log = "0.4"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["registry"] }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }
+
+[lints]
+workspace = true
