@@ -72,7 +72,7 @@ needs a crate that exists and a trusted publisher configured on it, so a cold
 start over OIDC is rejected by crates.io. Do not try to build one.
 
 The first upload of each crate is manual, in the table order, through
-`/home/dev/work/rs/publish.sh <dir>`. That script lives beside this folder and is
+`~/work/rs/publish.sh <dir>`. That script lives beside this folder and is
 deliberately not copied into the repository: it is how the first version of
 every crate is uploaded, not part of any one crate.
 
