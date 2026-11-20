@@ -11,7 +11,7 @@
 
 [package]
 edition = "2024"
-rust-version = "1.85"
+rust-version = "1.100"
 name = "neotales-tokio-postgres"
 version = "0.0.0-alpha.0"
 authors = ["Steven Fackler <sfackler@gmail.com>"]

@@ -11,7 +11,7 @@
 
 [package]
 edition = "2024"
-rust-version = "1.96"
+rust-version = "1.100"
 name = "neotales-sqlx-mssql"
 version = "0.0.0-alpha.0"
 build = false
