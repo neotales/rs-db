@@ -26,15 +26,14 @@ members = [
   "sqlx-mssql",
   "tokio-postgres",
 ]
-# Detached test fixtures and the vendored quiet forks are path dependencies or
-# host-side fixtures, not workspace members. Keeping them out of the workspace
-# means `--workspace` lints and documents the crates this repository ships,
-# while their own manifests still resolve from the paths that name them.
+# The D1 emulator and the tokio-postgres conformance harness are detached test
+# workspaces, not members. Cargo still counts a path dependency under the root
+# as a workspace package, so the three quiet roots under
+# dbapi-mssql-direct/vendor are members even though they are vendored forks.
+# That is why CI selects the crates it ships by name instead of using
+# `--workspace` for lint and test gates.
 exclude = [
   "dbapi-d1/emulator/worker",
-  "dbapi-mssql-direct/vendor/mssql-tds-0.3.0",
-  "dbapi-mssql-direct/vendor/native-tls-0.2.18",
-  "dbapi-mssql-direct/vendor/tokio-native-tls-0.3.1",
   "tokio-postgres/conformance",
 ]
 
