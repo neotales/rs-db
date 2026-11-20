@@ -18,7 +18,7 @@ def main():
     cache.mkdir(parents=True, exist_ok=True)
     if shutil.disk_usage(cache).free < 8 * 1024**3:
         raise SystemExit("packaged consumer requires at least 8 GiB free")
-    members = ["dbapi", "dbapi-clickhouse", "migration", "migration-clickhouse"]
+    members = ["dbapi", "dbapi-clickhouse", "klickhouse", "migration", "migration-clickhouse"]
     manifest = (workspace / "Cargo.toml").read_text()
     manifest = re.sub(
         r"\[workspace\].*?(?=\[workspace\.package\])",
@@ -69,10 +69,10 @@ edition = "2024"
 [features]
 experimental-native-migrations = ["neotales-migration-clickhouse/experimental-native-migrations"]
 [dependencies]
-neotales-dbapi = {{ path = "../source/data/dbapi" }}
-neotales-dbapi-clickhouse = {{ path = "../source/data/dbapi-clickhouse" }}
-neotales-migration = {{ path = "../source/data/migration" }}
-neotales-migration-clickhouse = {{ path = "../source/data/migration-clickhouse", default-features = false }}
+neotales-dbapi = {{ path = "../source/dbapi" }}
+neotales-dbapi-clickhouse = {{ path = "../source/dbapi-clickhouse" }}
+neotales-migration = {{ path = "../source/migration" }}
+neotales-migration-clickhouse = {{ path = "../source/migration-clickhouse", default-features = false }}
 getrandom = "{getrandom}"
 testcontainers = "{testcontainers}"
 tokio = {{ version = "{tokio}", features = ["io-util", "macros", "net", "rt-multi-thread", "time"] }}
@@ -88,10 +88,16 @@ tokio = {{ version = "{tokio}", features = ["io-util", "macros", "net", "rt-mult
              "experimental_dependency_recovery_contract"),
         ]:
             command = ["cargo", "test", "--offline", "--test", "live", *features]
-            listing = subprocess.check_output(
-                [*command, "--", "--ignored", "--list"], cwd=consumer, env=environment
-            ).decode()
-            if f"{selected}: test" not in listing.splitlines():
+            listing = subprocess.run(
+                [*command, "--", "--ignored", "--list"],
+                cwd=consumer, env=environment,
+                capture_output=True, text=True, check=False,
+            )
+            if listing.returncode != 0:
+                print(listing.stdout, end="")
+                print(listing.stderr, end="")
+                raise SystemExit(f"consumer test listing failed: {selected}")
+            if f"{selected}: test" not in listing.stdout.splitlines():
                 raise SystemExit(f"missing consumer test: {selected}")
             print(f"packaged consumer: {selected}", flush=True)
             subprocess.run(
