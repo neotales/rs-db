@@ -1,0 +1,479 @@
+name: ci
+
+# One repository, a virtual workspace with 24 crates. Twenty-three are
+# publishable; `dbapi-mssql-direct` is `publish = false`. Every cargo command
+# below selects the crates by name instead of passing `--workspace`, because
+# the vendored quiet forks and the detached conformance/emulator workspaces are
+# path dependencies with their own test surfaces, not crates this repository
+# ships.
+#
+# `--all-targets` does not run doctests, so each job that runs tests also runs a
+# `--doc` pass. The first-party doctest gate refuses an ignored example.
+#
+# Linux only by design. The live lanes need a Docker daemon, and the verified
+# PostgreSQL adapter links system OpenSSL. A skipped Windows or macOS leg is not
+# a pass, so those legs are not offered.
+
+on:
+  push:
+    # Every branch, not only the default one: a branch filter hides a failure
+    # until the work lands. No path filter either, because a change to a README
+    # can still be the change that breaks the build.
+    branches:
+      - "**"
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+
+jobs:
+  check:
+    name: fmt, clippy, tests, doctests, rustdoc
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: ./.github/actions/setup-rust
+        with:
+          cache-key: ci
+
+      - name: Format
+        run: >-
+          cargo fmt
+          -p neotales-dbapi -p neotales-dbapi-d1 -p neotales-dbapi-sqlite -p neotales-dbapi-sqlite-direct
+          -p neotales-dbapi-libsql -p neotales-dbapi-mysql -p neotales-dbapi-mariadb
+          -p neotales-dbapi-mssql -p neotales-dbapi-clickhouse
+          -p neotales-dbapi-postgres -p neotales-dbapi-postgres-tls
+          -p neotales-dbapi-mssql-direct
+          -p neotales-klickhouse -p neotales-libsql -p neotales-tokio-postgres -p neotales-sqlx-mssql
+          -p neotales-migration -p neotales-migration-sqlite -p neotales-migration-libsql
+          -p neotales-migration-postgres -p neotales-migration-mysql -p neotales-migration-mariadb
+          -p neotales-migration-mssql -p neotales-migration-clickhouse
+          -- --check
+
+      - name: Clippy
+        # Default features. The forks' optional upstream type features are an
+        # explicit opt-in in the conformance harness, not part of this surface.
+        run: >-
+          cargo clippy
+          -p neotales-dbapi -p neotales-dbapi-d1 -p neotales-dbapi-sqlite -p neotales-dbapi-sqlite-direct
+          -p neotales-dbapi-libsql -p neotales-dbapi-mysql -p neotales-dbapi-mariadb
+          -p neotales-dbapi-mssql -p neotales-dbapi-clickhouse
+          -p neotales-dbapi-postgres -p neotales-dbapi-postgres-tls
+          -p neotales-dbapi-mssql-direct
+          -p neotales-klickhouse -p neotales-libsql -p neotales-tokio-postgres -p neotales-sqlx-mssql
+          -p neotales-migration -p neotales-migration-sqlite -p neotales-migration-libsql
+          -p neotales-migration-postgres -p neotales-migration-mysql -p neotales-migration-mariadb
+          -p neotales-migration-mssql -p neotales-migration-clickhouse
+          --all-targets --no-deps -- -D warnings
+
+      - name: Clippy the experimental migration feature
+        run: >-
+          cargo clippy -p neotales-migration-clickhouse
+          --features experimental-native-migrations
+          --all-targets --no-deps -- -D warnings
+
+      - name: Test without a fixture
+        # PostgreSQL and its TLS adapter are absent because their non-ignored
+        # tests connect to a real server. Every provider and migration live test
+        # is #[ignore]d here and run by a live job below.
+        run: >-
+          cargo test
+          -p neotales-dbapi -p neotales-dbapi-d1 -p neotales-dbapi-sqlite -p neotales-dbapi-sqlite-direct
+          -p neotales-dbapi-libsql -p neotales-dbapi-mysql -p neotales-dbapi-mariadb
+          -p neotales-dbapi-mssql -p neotales-dbapi-clickhouse
+          -p neotales-dbapi-mssql-direct
+          -p neotales-klickhouse -p neotales-libsql -p neotales-tokio-postgres -p neotales-sqlx-mssql
+          -p neotales-migration -p neotales-migration-sqlite -p neotales-migration-libsql
+          -p neotales-migration-postgres -p neotales-migration-mysql -p neotales-migration-mariadb
+          -p neotales-migration-mssql -p neotales-migration-clickhouse
+          --all-targets
+
+      - name: SQLite consumer without SQLx compatibility
+        run: cargo test -p neotales-migration-sqlite --no-default-features --all-targets
+
+      - name: Verify SQLx-free normal runtime graph
+        run: eng/check-sqlite-no-sqlx.sh
+
+      - name: Verify direct provider dependency boundary
+        run: |
+          normal_tree="$(cargo tree -p neotales-dbapi-mssql-direct -e normal)"
+          if grep -qi sqlx <<<"$normal_tree"; then
+            echo "::error::direct provider normal dependency tree includes SQLx"
+            exit 1
+          fi
+
+      - name: Verify vendor inventory sealer
+        run: python3 dbapi-mssql-direct/tools/test-seal-vendor.py
+
+      - name: Verify production API excludes insecure test constructors
+        run: dbapi-mssql-direct/tests/security-boundary.sh
+
+      - name: Blocking adapter tests
+        run: cargo test -p neotales-dbapi --features blocking
+
+      - name: D1 wasm compile and codec tests
+        run: |
+          rustup target add wasm32-unknown-unknown --toolchain 1.100.0
+          cargo install --locked --version 0.2.130 wasm-bindgen-cli
+          cargo check -p neotales-dbapi -p neotales-dbapi-d1
+          cargo check -p neotales-dbapi -p neotales-dbapi-d1 --all-features
+          cargo check --target wasm32-unknown-unknown -p neotales-dbapi -p neotales-dbapi-d1
+          python3 eng/test-check-d1-wasm-blocking.py
+          python3 eng/check-d1-wasm-blocking.py
+          eng/test-dbapi-d1.sh
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22.17.1
+
+      - name: Local D1 binding diagnostic (network namespace)
+        # Downloads happen here, before run.sh isolates the Worker and Node from
+        # the network.
+        run: |
+          cargo fetch --locked --manifest-path dbapi-d1/emulator/worker/Cargo.toml
+          cd dbapi-d1/emulator
+          npm ci --ignore-scripts --no-audit --no-fund
+          mkdir -p "$RUNNER_TEMP/d1-tmp" "$RUNNER_TEMP/d1-target"
+          TMPDIR="$RUNNER_TEMP/d1-tmp" CARGO_TARGET_DIR="$RUNNER_TEMP/d1-target" ./run.sh
+
+      - name: Doc tests
+        run: eng/test-doctests.sh all
+
+      - name: Fork doc tests
+        # The libSQL fork carries one upstream `ignore` example. It is the only
+        # ignored doctest in the repository, and it stays out of the strict
+        # first-party gate above.
+        run: cargo test -p neotales-libsql --doc
+
+      - name: Documentation
+        env:
+          RUSTDOCFLAGS: "-D warnings"
+        run: >-
+          cargo doc
+          -p neotales-dbapi -p neotales-dbapi-d1 -p neotales-dbapi-sqlite -p neotales-dbapi-sqlite-direct
+          -p neotales-dbapi-libsql -p neotales-dbapi-mysql -p neotales-dbapi-mariadb
+          -p neotales-dbapi-mssql -p neotales-dbapi-clickhouse
+          -p neotales-dbapi-postgres -p neotales-dbapi-postgres-tls
+          -p neotales-dbapi-mssql-direct
+          -p neotales-klickhouse -p neotales-libsql -p neotales-tokio-postgres -p neotales-sqlx-mssql
+          -p neotales-migration -p neotales-migration-sqlite -p neotales-migration-libsql
+          -p neotales-migration-postgres -p neotales-migration-mysql -p neotales-migration-mariadb
+          -p neotales-migration-mssql -p neotales-migration-clickhouse
+          --no-deps
+
+  msrv:
+    name: msrv
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: ./.github/actions/setup-rust
+        with:
+          cache-key: msrv
+
+      # Every publishable manifest must declare the same minimum, not just the
+      # first package cargo happens to list.
+      - name: Check the declared minimum Rust version
+        run: |
+          cargo metadata --no-deps --format-version 1 > metadata.json
+          python3 - <<'PY'
+          import json
+          import sys
+
+          with open("metadata.json", encoding="utf-8") as handle:
+              packages = json.load(handle)["packages"]
+
+          if not packages:
+              sys.exit("cargo metadata listed no packages")
+
+          # Path dependencies under dbapi-mssql-direct/vendor are vendored
+          # crates.io packages, not crates this repository releases.
+          vendored = {"mssql-tds", "native-tls", "tokio-native-tls"}
+
+          failed = False
+          for package in packages:
+              if package["name"] in vendored:
+                  continue
+              declared = package.get("rust_version") or ""
+              print(f"{package['name']}: rust-version {declared or '<unset>'}")
+              if declared != "1.100":
+                  print(
+                      f"::error::{package['name']} must declare "
+                      f'rust-version = "1.100", found {declared or "<unset>"}.'
+                  )
+                  failed = True
+          sys.exit(1 if failed else 0)
+          PY
+
+      - name: Test on the minimum supported Rust version
+        run: >-
+          cargo test
+          -p neotales-dbapi -p neotales-dbapi-d1 -p neotales-dbapi-sqlite -p neotales-dbapi-sqlite-direct
+          -p neotales-dbapi-libsql -p neotales-dbapi-mysql -p neotales-dbapi-mariadb
+          -p neotales-dbapi-mssql -p neotales-dbapi-clickhouse
+          -p neotales-dbapi-mssql-direct
+          -p neotales-klickhouse -p neotales-libsql -p neotales-tokio-postgres -p neotales-sqlx-mssql
+          -p neotales-migration -p neotales-migration-sqlite -p neotales-migration-libsql
+          -p neotales-migration-postgres -p neotales-migration-mysql -p neotales-migration-mariadb
+          -p neotales-migration-mssql -p neotales-migration-clickhouse
+          --all-targets
+
+      # `--all-targets` does not include doctests, and a doctest that uses a
+      # newer API breaks the declared minimum just as a unit test does.
+      - name: Doctests on the minimum supported Rust version
+        run: eng/test-doctests.sh all
+
+  dbapi-postgres-live:
+    name: dbapi postgres (plaintext live)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    services:
+      postgres:
+        # Pinned by manifest digest. The provider's loopback test constructor
+        # accepts loopback addresses only, so the service is published on
+        # 127.0.0.1:55433 exactly as the crate tests expect.
+        image: postgres:17@sha256:846a7ddaa67a4b354ae1d21087b683901aa6113a4ed626d3787cfbf6c85e3e07
+        env:
+          POSTGRES_DB: postgres
+          POSTGRES_USER: postgres
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 127.0.0.1:55433:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 24
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: ./.github/actions/setup-rust
+        with:
+          cache-key: live
+
+      - name: Wait for PostgreSQL
+        run: |
+          for _ in $(seq 1 60); do
+            if docker exec "${{ job.services.postgres.id }}" pg_isready -U postgres -d postgres >/dev/null 2>&1; then
+              exit 0
+            fi
+            sleep 1
+          done
+          docker logs "${{ job.services.postgres.id }}" || true
+          echo "::error::disposable PostgreSQL did not become ready"
+          exit 1
+
+      - name: Test against the disposable server
+        # `--all-targets` compiles the paged SQL source target but does not run
+        # it: that case is #[ignore]d and owns a different, digest-pinned
+        # container. The separate job below runs it.
+        run: cargo test -p neotales-dbapi-postgres --all-targets
+
+  dbapi-sql-page-source:
+    name: dbapi postgres (paged SQL source live)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/setup-rust
+        with:
+          cache-key: live
+      - name: PostgreSQL SQL page-source live lane
+        run: dbapi-postgres/tests/sql_page_source_live.sh
+
+  dbapi-mysql:
+    name: mysql dbapi (live)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/setup-rust
+        with:
+          cache-key: live
+      - name: MySQL dbapi live lane
+        run: dbapi-mysql/tests/live.sh
+
+  mariadb-live:
+    name: mariadb dbapi (live)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/setup-rust
+        with:
+          cache-key: live
+      - name: MariaDB dbapi live lane
+        run: dbapi-mariadb/tests/live.sh
+
+  clickhouse-live:
+    name: clickhouse dbapi (live)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/setup-rust
+        with:
+          cache-key: live
+      - name: ClickHouse dbapi live lane
+        run: dbapi-clickhouse/tests/live.sh
+
+  mssql-live:
+    name: dbapi mssql (live)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/setup-rust
+        with:
+          cache-key: live
+      - name: SQL Server live lane
+        run: dbapi-mssql/tests/live.sh
+      - name: Forked driver live cancellation and pool-reuse lane
+        run: sqlx-mssql/tests/live.sh
+
+  dbapi-tls:
+    name: dbapi postgres (verified TLS live)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/setup-rust
+        with:
+          cache-key: live
+      - name: Verified TLS live lane
+        run: dbapi-postgres-tls/tests/live.sh
+
+  mssql-direct-live:
+    name: direct SQL Server provider (live)
+    runs-on: ubuntu-24.04
+    # Budget: setup/build 15m + direct_live 10m10s + TLS lane 29m20s.
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/setup-rust
+        with:
+          cache-key: live
+      - name: Direct provider live lane
+        run: dbapi-mssql-direct/tests/live.sh
+
+  libsql:
+    name: libsql remote security and conformance
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/setup-rust
+        with:
+          cache-key: live
+      - name: Fixture-free fork tests
+        run: cargo test -p neotales-dbapi-libsql -p neotales-libsql --all-targets
+      - name: Install cargo-deny
+        run: cargo install cargo-deny --version 0.20.2 --locked
+      - name: Unsuppressed provider advisories
+        run: cargo deny --manifest-path dbapi-libsql/Cargo.toml --config dbapi-libsql/deny.toml --locked check advisories
+      - name: Unsuppressed fork test advisories
+        run: cargo deny --manifest-path libsql/Cargo.toml --config dbapi-libsql/deny.toml --locked check advisories
+      - name: Fetch exact sqld image
+        run: docker pull ghcr.io/tursodatabase/libsql-server@sha256:6dd3eb276d9d3604e4a48ac4a999a2e267814732d57d7e94c04ba71482333a67
+      - name: Live pinned sqld
+        run: dbapi-libsql/tests/live.sh
+
+  conformance:
+    name: quiet fork conformance (default features)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/setup-rust
+        with:
+          cache-key: live
+      - name: Upstream tokio-postgres 0.7.18 suite against the fork
+        run: tokio-postgres/conformance/run.sh
+
+  migration-mysql:
+    name: migration mysql (live)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/setup-rust
+        with:
+          cache-key: live
+      - name: MySQL migration live lane
+        run: migration-mysql/tests/live.sh
+
+  migration-libsql:
+    name: migration libsql (live)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/setup-rust
+        with:
+          cache-key: live
+      - name: Live pinned sqld migrations
+        run: migration-libsql/tests/live.sh
+
+  migration-mariadb:
+    name: migration mariadb (live)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/setup-rust
+        with:
+          cache-key: live
+      - name: MariaDB migration live lane
+        run: migration-mariadb/tests/live.sh
+
+  migration-clickhouse:
+    name: migration clickhouse (live)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/setup-rust
+        with:
+          cache-key: live
+      - name: ClickHouse migration default fail-closed lane
+        run: migration-clickhouse/tests/live.sh
+      - name: ClickHouse migration all-features fail-closed lane
+        run: migration-clickhouse/tests/live.sh --all-features
+      - name: ClickHouse migration unit-test recovery lane
+        run: migration-clickhouse/tests/live.sh --test-harness
+
+  migration-mssql:
+    name: migration mssql (live)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/setup-rust
+        with:
+          cache-key: live
+      - name: SQL Server migration live lane
+        run: migration-mssql/tests/live.sh
+
+  migration-postgres:
+    name: migration postgres (live)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/setup-rust
+        with:
+          cache-key: live
+      - name: Migration live lane
+        run: migration-postgres/tests/live.sh

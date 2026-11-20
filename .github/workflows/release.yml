@@ -1,0 +1,374 @@
+name: release
+
+# Publishing is driven by a tag, never by a branch. The tag must equal `v` plus
+# the version in every publishable manifest, so the thing that ran is a thing
+# that can be named.
+#
+# Trusted publishing: the publish job asks crates.io for a short-lived token
+# over OIDC. There is no CARGO_REGISTRY_TOKEN secret in this repository.
+# crates.io cannot bootstrap a crate this way. The first publish of each new
+# crate is manual, in dependency order, through ~/work/rs/publish.sh. See
+# RELEASE.md.
+#
+# The publish job sets no GitHub environment on purpose. The trusted publisher
+# saved on crates.io for this organisation has an empty environment, and
+# crates.io compares that field with the job's, so an environment on either side
+# alone fails the token exchange.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+
+jobs:
+  # Runs on both triggers. On workflow_dispatch this job is the whole release:
+  # checks and dry runs, never a real publish.
+  check:
+    name: pre-publish checks
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: ./.github/actions/setup-rust
+        with:
+          cache-key: release
+
+      - name: Format
+        run: >-
+          cargo fmt
+          -p neotales-dbapi -p neotales-dbapi-d1 -p neotales-dbapi-sqlite -p neotales-dbapi-sqlite-direct
+          -p neotales-dbapi-libsql -p neotales-dbapi-mysql -p neotales-dbapi-mariadb
+          -p neotales-dbapi-mssql -p neotales-dbapi-clickhouse
+          -p neotales-dbapi-postgres -p neotales-dbapi-postgres-tls
+          -p neotales-dbapi-mssql-direct
+          -p neotales-klickhouse -p neotales-libsql -p neotales-tokio-postgres -p neotales-sqlx-mssql
+          -p neotales-migration -p neotales-migration-sqlite -p neotales-migration-libsql
+          -p neotales-migration-postgres -p neotales-migration-mysql -p neotales-migration-mariadb
+          -p neotales-migration-mssql -p neotales-migration-clickhouse
+          -- --check
+
+      - name: Clippy
+        run: >-
+          cargo clippy
+          -p neotales-dbapi -p neotales-dbapi-d1 -p neotales-dbapi-sqlite -p neotales-dbapi-sqlite-direct
+          -p neotales-dbapi-libsql -p neotales-dbapi-mysql -p neotales-dbapi-mariadb
+          -p neotales-dbapi-mssql -p neotales-dbapi-clickhouse
+          -p neotales-dbapi-postgres -p neotales-dbapi-postgres-tls
+          -p neotales-dbapi-mssql-direct
+          -p neotales-klickhouse -p neotales-libsql -p neotales-tokio-postgres -p neotales-sqlx-mssql
+          -p neotales-migration -p neotales-migration-sqlite -p neotales-migration-libsql
+          -p neotales-migration-postgres -p neotales-migration-mysql -p neotales-migration-mariadb
+          -p neotales-migration-mssql -p neotales-migration-clickhouse
+          --all-targets --no-deps -- -D warnings
+
+      - name: Test
+        run: >-
+          cargo test
+          -p neotales-dbapi -p neotales-dbapi-d1 -p neotales-dbapi-sqlite -p neotales-dbapi-sqlite-direct
+          -p neotales-dbapi-libsql -p neotales-dbapi-mysql -p neotales-dbapi-mariadb
+          -p neotales-dbapi-mssql -p neotales-dbapi-clickhouse
+          -p neotales-dbapi-mssql-direct
+          -p neotales-klickhouse -p neotales-libsql -p neotales-tokio-postgres -p neotales-sqlx-mssql
+          -p neotales-migration -p neotales-migration-sqlite -p neotales-migration-libsql
+          -p neotales-migration-postgres -p neotales-migration-mysql -p neotales-migration-mariadb
+          -p neotales-migration-mssql -p neotales-migration-clickhouse
+          --all-targets
+
+      - name: Doc tests
+        run: eng/test-doctests.sh all
+
+      - name: Fork doc tests
+        run: cargo test -p neotales-libsql --doc
+
+      # A crate whose internal dependency is not on crates.io yet cannot be
+      # packaged for upload. That exact resolution error is expected before the
+      # first upload and on a releasing commit. Any compile, manifest or
+      # metadata error still fails this step.
+      - name: Package without publishing
+        run: |
+          set -euo pipefail
+
+          packages=(
+            neotales-klickhouse
+            neotales-libsql
+            neotales-tokio-postgres
+            neotales-dbapi
+            neotales-migration
+            neotales-sqlx-mssql
+            neotales-dbapi-d1
+            neotales-dbapi-sqlite
+            neotales-dbapi-sqlite-direct
+            neotales-dbapi-libsql
+            neotales-dbapi-mysql
+            neotales-dbapi-mariadb
+            neotales-dbapi-mssql
+            neotales-dbapi-clickhouse
+            neotales-dbapi-postgres-tls
+            neotales-dbapi-postgres
+            neotales-migration-sqlite
+            neotales-migration-libsql
+            neotales-migration-mysql
+            neotales-migration-mariadb
+            neotales-migration-mssql
+            neotales-migration-clickhouse
+            neotales-migration-postgres
+          )
+
+          failed=0
+          for package in "${packages[@]}"; do
+            echo "::group::cargo publish --dry-run -p $package"
+            set +e
+            output=$(cargo publish -p "$package" --dry-run --locked 2>&1)
+            status=$?
+            set -e
+            printf '%s\n' "$output"
+            echo "::endgroup::"
+            if [ "$status" -eq 0 ]; then
+              continue
+            fi
+            if printf '%s\n' "$output" | grep -F 'no matching package named' >/dev/null \
+              || printf '%s\n' "$output" | grep -F 'failed to select a version for the requirement' >/dev/null; then
+              echo "expected: $package cannot see an unpublished internal dependency yet"
+              continue
+            fi
+            echo "::error::$package failed its dry run for a reason other than an unpublished dependency"
+            failed=1
+          done
+          exit "$failed"
+
+  version:
+    name: tag matches the crate version
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Compare the tag with every publishable manifest
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import os
+          import sys
+          import tomllib
+
+          manifests = {
+              "neotales-klickhouse": "klickhouse/Cargo.toml",
+              "neotales-libsql": "libsql/Cargo.toml",
+              "neotales-tokio-postgres": "tokio-postgres/Cargo.toml",
+              "neotales-dbapi": "dbapi/Cargo.toml",
+              "neotales-migration": "migration/Cargo.toml",
+              "neotales-sqlx-mssql": "sqlx-mssql/Cargo.toml",
+              "neotales-dbapi-d1": "dbapi-d1/Cargo.toml",
+              "neotales-dbapi-sqlite": "dbapi-sqlite/Cargo.toml",
+              "neotales-dbapi-sqlite-direct": "dbapi-sqlite-direct/Cargo.toml",
+              "neotales-dbapi-libsql": "dbapi-libsql/Cargo.toml",
+              "neotales-dbapi-mysql": "dbapi-mysql/Cargo.toml",
+              "neotales-dbapi-mariadb": "dbapi-mariadb/Cargo.toml",
+              "neotales-dbapi-mssql": "dbapi-mssql/Cargo.toml",
+              "neotales-dbapi-clickhouse": "dbapi-clickhouse/Cargo.toml",
+              "neotales-dbapi-postgres-tls": "dbapi-postgres-tls/Cargo.toml",
+              "neotales-dbapi-postgres": "dbapi-postgres/Cargo.toml",
+              "neotales-migration-sqlite": "migration-sqlite/Cargo.toml",
+              "neotales-migration-libsql": "migration-libsql/Cargo.toml",
+              "neotales-migration-mysql": "migration-mysql/Cargo.toml",
+              "neotales-migration-mariadb": "migration-mariadb/Cargo.toml",
+              "neotales-migration-mssql": "migration-mssql/Cargo.toml",
+              "neotales-migration-clickhouse": "migration-clickhouse/Cargo.toml",
+              "neotales-migration-postgres": "migration-postgres/Cargo.toml",
+          }
+
+          versions = {}
+          for name, path in manifests.items():
+              with open(path, "rb") as handle:
+                  package = tomllib.load(handle).get("package")
+              if not isinstance(package, dict):
+                  sys.exit(f"{path} has no [package] table")
+              version = package.get("version")
+              if not isinstance(version, str):
+                  sys.exit(
+                      f"{path} [package] version is not a literal string. "
+                      "Each crate must carry the published version."
+                  )
+              versions[name] = version
+
+          tag = os.environ["TAG"]
+          print(f"tag: {tag}")
+          for name, version in versions.items():
+              print(f"{name}: {version}")
+
+          distinct = set(versions.values())
+          if len(distinct) != 1:
+              print(f"::error::the crates carry different versions: {versions}")
+              sys.exit(1)
+
+          expected = f"v{distinct.pop()}"
+          if tag != expected:
+              print(f"::error::tag {tag} does not match {expected}")
+              sys.exit(1)
+          PY
+
+  publish:
+    name: publish to crates.io
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [check, version]
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    # No GitHub environment, deliberately. The trusted publisher stored on
+    # crates.io for this organisation has an empty environment, and crates.io
+    # compares that field with the job's. Setting `environment: release` here
+    # makes the OIDC token exchange fail with no other symptom. If someone ever
+    # does set an environment name on crates.io, this job must set that exact
+    # name. See RELEASE.md.
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: ./.github/actions/setup-rust
+        with:
+          cache-key: release-publish
+
+      - name: Exchange the OIDC token for a crates.io token
+        id: auth
+        uses: rust-lang/crates-io-auth-action@3268eb413133e2960fa4ae0e963ca76380c54cd9 # v1.0.6
+
+      # One exchange covers every crate whose trusted publisher matches
+      # release.yml and an empty environment. Publish in dependency order.
+      # A re-run skips a version already on crates.io. Do not republish, and do
+      # not delete or move the tag.
+      - name: Publish every crate in dependency order
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
+        run: |
+          set -euo pipefail
+
+          packages=(
+            neotales-klickhouse
+            neotales-libsql
+            neotales-tokio-postgres
+            neotales-dbapi
+            neotales-migration
+            neotales-sqlx-mssql
+            neotales-dbapi-d1
+            neotales-dbapi-sqlite
+            neotales-dbapi-sqlite-direct
+            neotales-dbapi-libsql
+            neotales-dbapi-mysql
+            neotales-dbapi-mariadb
+            neotales-dbapi-mssql
+            neotales-dbapi-clickhouse
+            neotales-dbapi-postgres-tls
+            neotales-dbapi-postgres
+            neotales-migration-sqlite
+            neotales-migration-libsql
+            neotales-migration-mysql
+            neotales-migration-mariadb
+            neotales-migration-mssql
+            neotales-migration-clickhouse
+            neotales-migration-postgres
+          )
+
+          manifest_for() {
+            case "$1" in
+              neotales-klickhouse) echo klickhouse/Cargo.toml ;;
+              neotales-libsql) echo libsql/Cargo.toml ;;
+              neotales-tokio-postgres) echo tokio-postgres/Cargo.toml ;;
+              neotales-dbapi) echo dbapi/Cargo.toml ;;
+              neotales-migration) echo migration/Cargo.toml ;;
+              neotales-sqlx-mssql) echo sqlx-mssql/Cargo.toml ;;
+              neotales-dbapi-d1) echo dbapi-d1/Cargo.toml ;;
+              neotales-dbapi-sqlite) echo dbapi-sqlite/Cargo.toml ;;
+              neotales-dbapi-sqlite-direct) echo dbapi-sqlite-direct/Cargo.toml ;;
+              neotales-dbapi-libsql) echo dbapi-libsql/Cargo.toml ;;
+              neotales-dbapi-mysql) echo dbapi-mysql/Cargo.toml ;;
+              neotales-dbapi-mariadb) echo dbapi-mariadb/Cargo.toml ;;
+              neotales-dbapi-mssql) echo dbapi-mssql/Cargo.toml ;;
+              neotales-dbapi-clickhouse) echo dbapi-clickhouse/Cargo.toml ;;
+              neotales-dbapi-postgres-tls) echo dbapi-postgres-tls/Cargo.toml ;;
+              neotales-dbapi-postgres) echo dbapi-postgres/Cargo.toml ;;
+              neotales-migration-sqlite) echo migration-sqlite/Cargo.toml ;;
+              neotales-migration-libsql) echo migration-libsql/Cargo.toml ;;
+              neotales-migration-mysql) echo migration-mysql/Cargo.toml ;;
+              neotales-migration-mariadb) echo migration-mariadb/Cargo.toml ;;
+              neotales-migration-mssql) echo migration-mssql/Cargo.toml ;;
+              neotales-migration-clickhouse) echo migration-clickhouse/Cargo.toml ;;
+              neotales-migration-postgres) echo migration-postgres/Cargo.toml ;;
+              *) echo "unknown package $1" >&2; return 1 ;;
+            esac
+          }
+
+          version_of() {
+            python3 - "$1" <<'PY'
+          import sys
+          import tomllib
+          with open(sys.argv[1], "rb") as handle:
+              version = tomllib.load(handle)["package"]["version"]
+          if not isinstance(version, str):
+              raise SystemExit(f"{sys.argv[1]} version is not a string")
+          print(version)
+          PY
+          }
+
+          registry_has() {
+            local crate="$1" version="$2" code
+            code=$(curl -sS -o /dev/null -w '%{http_code}' \
+              -H 'User-Agent: neotales-release (https://github.com/neotales)' \
+              "https://crates.io/api/v1/crates/${crate}/${version}" || echo 000)
+            [ "$code" = "200" ]
+          }
+
+          publish_crate() {
+            local package="$1" manifest="$2"
+            local version attempt output status
+            version=$(version_of "$manifest")
+            if registry_has "$package" "$version"; then
+              echo "$package $version is already on crates.io; not publishing again"
+              return 0
+            fi
+            for attempt in $(seq 1 20); do
+              set +e
+              output=$(cargo publish -p "$package" --locked 2>&1)
+              status=$?
+              set -e
+              printf '%s\n' "$output"
+              if [ "$status" -eq 0 ]; then
+                echo "uploaded $package $version"
+                return 0
+              fi
+              if printf '%s\n' "$output" | grep -F 'already uploaded' >/dev/null; then
+                echo "$package $version already uploaded; not publishing again"
+                return 0
+              fi
+              if printf '%s\n' "$output" | grep -F 'failed to select a version for the requirement' >/dev/null \
+                || printf '%s\n' "$output" | grep -F 'no matching package named' >/dev/null \
+                || printf '%s\n' "$output" | grep -Eiq '429|rate limit|too many requests'; then
+                echo "retryable publish failure for $package (attempt $attempt); waiting 20s"
+                sleep 20
+                continue
+              fi
+              echo "publish of $package failed"
+              return 1
+            done
+            echo "publish of $package did not succeed after retries"
+            return 1
+          }
+
+          for package in "${packages[@]}"; do
+            publish_crate "$package" "$(manifest_for "$package")"
+          done
