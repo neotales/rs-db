@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Require the sole intentional blocking-feature error from Cargo's wasm check."""
 import json
+import os
 import re
 import subprocess
 import sys
@@ -36,8 +37,16 @@ def verify(result):
 
 
 def main():
+    # Cargo colours stderr when CARGO_TERM_COLOR=always, which CI sets. The
+    # summary regex below is anchored on the plain `error:` prefix, so force a
+    # colour-free child process rather than teach the parser ANSI codes.
+    environment = os.environ.copy()
+    environment["CARGO_TERM_COLOR"] = "never"
     try:
-        result = subprocess.run(COMMAND, capture_output=True, text=True, errors="replace", check=False)
+        result = subprocess.run(
+            COMMAND, capture_output=True, text=True, errors="replace",
+            check=False, env=environment,
+        )
         valid = verify(result)
     except OSError:
         valid = False
