@@ -85,6 +85,11 @@ not part of any published package: `dbapi-d1/emulator` and
 `tokio-postgres/conformance` are detached workspaces, and the D1 emulator is
 excluded from the `neotales-dbapi-d1` package.
 
+The local D1 binding diagnostic needs an unprivileged user namespace for its
+loopback-only network guard. It passes on a host that allows one and is blocked
+on GitHub-hosted runners, which deny the UID mapping. CI warns and skips that
+fixture rather than reporting a pass; the host and wasm D1 tests still run.
+
 ## Publish order
 
 All publishable crates share one version and one tag. Publish in dependency

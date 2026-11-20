@@ -139,11 +139,18 @@ jobs:
 
       - name: Local D1 binding diagnostic (network namespace)
         # Downloads happen here, before run.sh isolates the Worker and Node from
-        # the network.
+        # the network. GitHub-hosted runners deny the unprivileged user-namespace
+        # mapping that run.sh needs, so the lane reports a warning and stops
+        # there instead of pretending it ran. The host and wasm D1 tests above
+        # still run; this fixture-free thread is the only blocked one.
         run: |
           cargo fetch --locked --manifest-path dbapi-d1/emulator/worker/Cargo.toml
           cd dbapi-d1/emulator
           npm ci --ignore-scripts --no-audit --no-fund
+          if ! unshare -Urn true >/dev/null 2>&1; then
+            echo "::warning::unprivileged user namespaces are unavailable on this runner; the local D1 binding diagnostic is blocked, not passed"
+            exit 0
+          fi
           mkdir -p "$RUNNER_TEMP/d1-tmp" "$RUNNER_TEMP/d1-target"
           TMPDIR="$RUNNER_TEMP/d1-tmp" CARGO_TARGET_DIR="$RUNNER_TEMP/d1-target" ./run.sh
 
