@@ -67,6 +67,11 @@ NO_MATCHING = re.compile(r"no matching package named `([^`]+)` found")
 SELECT_VERSION = re.compile(
     r"failed to select a version for the requirement `([^`=<>~^ ]+)\s*(?:[=<>~^]+)\s*([^`]+)`"
 )
+ANSI = re.compile(r"\x1b\[[0-9;]*m")
+
+
+def strip_ansi(text: str) -> str:
+    return ANSI.sub("", text)
 
 
 def workspace_versions() -> dict[str, str]:
@@ -95,6 +100,10 @@ def classify(
     """Return (accepted, reason) for one dry-run result."""
     if status == 0:
         return True, "packaged and verified"
+
+    # CI sets CARGO_TERM_COLOR=always, so the captured output contains SGR
+    # escapes around `error:` and paths. Strip them before matching text.
+    output = strip_ansi(output)
 
     expected = versions.get(package)
     if expected is None:
@@ -165,6 +174,12 @@ Caused by:
   location searched: crates.io index
   required by package `neotales-dbapi-sqlite v0.0.0-alpha.0 (/tmp/x)`
 """,
+        True,
+    ),
+    (
+        "expected sibling with CI colour codes",
+        101,
+        "\x1b[1m\x1b[91merror\x1b[0m: failed to prepare local package for uploading\n\nCaused by:\n  no matching package named `neotales-dbapi` found\n  location searched: crates.io index\n  required by package `neotales-dbapi-sqlite v0.0.0-alpha.0 (/tmp/x)`\n",
         True,
     ),
     (
