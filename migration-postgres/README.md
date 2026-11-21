@@ -1,5 +1,55 @@
 # neotales-migration-postgres
 
+Locked transactional PostgreSQL 17 migrations over the quiet `neotales-dbapi` provider.
+
+By [x0craft](https://github.com/x0craft).
+
+[![Neotales](https://github.com/neotales/brand/raw/main/assets/logo.png)](https://github.com/neotales/rs-db)
+
+<!-- badges: crates.io, docs.rs, CI. Add once the crate name and first version exist. -->
+
+## Install 📦
+
+```sh
+cargo add neotales-migration neotales-migration-postgres
+```
+
+## What you can do 🔧
+
+**Apply up and down inside one schema-wide advisory lock.** The backend requires PostgreSQL 17,
+validates the exact applied checksum prefix, and commits scripts with ledger writes.
+
+```rust,no_run
+use std::time::Duration;
+use neotales_migration::{Migration, Migrations};
+use neotales_migration_postgres::PostgresBackend;
+
+async fn migrate(
+    pool: &dyn neotales_dbapi::Pool,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let definitions = Migrations::new(vec![Migration::new(
+        1,
+        "orders",
+        "CREATE TABLE app.orders (id bigint PRIMARY KEY)",
+        Some("DROP TABLE app.orders".to_owned()),
+    )?])?;
+    let backend = PostgresBackend::new("app", "migration_history", Duration::from_secs(2))?;
+    backend
+        .up(pool, "orders", &definitions, "binding-fingerprint-v1", &[("app", "orders")])
+        .await?;
+    Ok(())
+}
+```
+
+**Flatten is ledger-only.** It replaces the exact complete legacy history with the marked
+baseline; it never executes the baseline SQL.
+
+**Reconcile unknown commits.** An unconfirmed `COMMIT` is never reported as success or rollback;
+inspect count and head before another operation.
+
+
+## Scope
+
 PostgreSQL 17 transactional up/down and ledger-only flatten over quiet
 `neotales-dbapi`, using
 the driver-free `neotales-migration` planner. This alpha crate supports history
@@ -307,3 +357,6 @@ barriers, concurrent callers and reflatten rejection. The protocol fixture also
 holds an actual ledger DELETE before cancellation to prove rollback of removed
 legacy rows, and withholds an actual flatten COMMIT completion to prove unknown
 outcome handling despite an independently observed committed baseline.
+
+## Licence 📜
+MIT. See [LICENSE.md](LICENSE.md).

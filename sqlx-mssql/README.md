@@ -1,22 +1,71 @@
-# sqlx-mssql-rs
+# neotales-sqlx-mssql
 
-Microsoft SQL Server driver for SQLx, built on Microsoft's `mssql-tds` TDS
-implementation.
+Fork of `sqlx-mssql-rs-core` 0.1.2, the core SQLx driver for Microsoft SQL Server built on
+Microsoft's `mssql-tds` TDS implementation.
 
-This crate connects SQLx to Microsoft SQL Server and Azure SQL by speaking the
-TDS protocol directly. There is no ODBC driver manager, no native client library
-to install, and no background thread bridging to a blocking API: the underlying
-client is fully asynchronous, so the driver is Tokio-only and adds nothing but
-crates.io dependencies.
+By [x0craft](https://github.com/x0craft).
 
-> **Status:** published on crates.io as version `0.1.2`. The git dependency form
-> below also works for tracking unreleased changes.
+Upstream by the sqlx-mssql-rs contributors. This fork is maintained by [x0craft](https://github.com/x0craft) for Neotales; upstream is not responsible for local changes.
+
+[![Neotales](https://github.com/neotales/brand/raw/main/assets/logo.png)](https://github.com/neotales/rs-db)
+
+<!-- badges: crates.io, docs.rs, CI. Add once the crate name and first version exist. -->
+
+## Install 📦
+
+This is a prerelease fork. The package is `neotales-sqlx-mssql`; the library name remains
+`sqlx_mssql_rs_core`. Pin the exact version:
+
+```sh
+cargo add neotales-sqlx-mssql@=0.0.0-alpha.0
+```
+
+## What you can do 🔧
+
+**Connect through SQLx and run a query.** The driver speaks TDS directly, so there is no ODBC
+manager and no blocking bridge.
+
+```rust,no_run
+use sqlx_core::connection::Connection;
+use sqlx_core::row::Row;
+use sqlx_mssql_rs_core::MssqlConnection;
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let mut conn = MssqlConnection::connect(
+        "mssql://app:from-your-secret-store@db.example.com:1433/app?trust_certificate=true",
+    )
+    .await?;
+    let row = sqlx_core::query::query("SELECT 1")
+        .fetch_one(&mut conn)
+        .await?;
+    let value: i32 = row.try_get(0)?;
+    assert_eq!(value, 1);
+    conn.close().await?;
+    Ok(())
+}
+```
+
+**Use the fork through the supported provider.** `neotales-dbapi-mssql` owns the DBAPI traits,
+restricted write grammar, session setup, and sanitized errors. This crate is its TDS transport.
+
+**Bind native `@P1` names.** This fork sends the original statement unchanged and validates
+`@P1`, `@P2`, ... references; it does not use the upstream `?` parameter form. The `?` examples in
+the retained upstream sections below do not describe this fork.
+
+**Know what this package contains.** It is the core driver only. The upstream CLI
+(`sqlx-mssql-rs-cli`), the `full` example, and the upstream repository's test harness are not
+packaged here. The sections below describe the upstream driver surface; where they mention the CLI,
+the `full` example, or `?` parameters, treat them as upstream documentation rather than this
+package.
+
+## Upstream overview
 
 ## Minimal Query
 
 ```toml
 [dependencies]
-sqlx-mssql-rs = "0.1.2"
+neotales-sqlx-mssql = "=0.0.0-alpha.0"
 sqlx-core = { version = "0.9.0", default-features = false }
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 ```
@@ -24,12 +73,12 @@ tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 ```rust
 use sqlx_core::connection::Connection;
 use sqlx_core::row::Row;
-use sqlx_mssql_rs::MssqlConnection;
+use sqlx_mssql_rs_core::MssqlConnection;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let mut conn = MssqlConnection::connect(
-        "mssql://sa:MyPass@localhost:1433/testdb?trust_certificate=true",
+        "mssql://app:from-your-secret-store@db.example.com:1433/app?trust_certificate=true",
     ).await?;
 
     let row = sqlx_core::query::query("SELECT 1")
@@ -66,11 +115,11 @@ Port 1433 is assumed when omitted.
 
 ### Builder methods
 
-```rust
+```rust,no_run
 use std::str::FromStr;
 use std::time::Duration;
 use sqlx_core::connection::ConnectOptions;
-use sqlx_mssql_rs::{MssqlConnectOptions, MssqlEncryption};
+use sqlx_mssql_rs_core::{MssqlConnectOptions, MssqlEncryption};
 
 let mut options = MssqlConnectOptions::from_str("mssql://localhost/testdb")?;
 options.encrypt(true)
@@ -90,7 +139,7 @@ for servers configured to demand TDS 8.0. `server_certificate()` pins a specific
 certificate instead of relying on a trusted root, which is the alternative to
 turning validation off with `trust_certificate()`:
 
-```rust
+```rust,no_run
 options
     .encryption(MssqlEncryption::Strict)
     .server_certificate("/etc/ssl/server.pem");
@@ -109,12 +158,12 @@ runtime, so there is no build-time Kerberos dependency.
 
 ## Connection Pooling
 
-```rust
-use sqlx_mssql_rs::MssqlPoolOptions;
+```rust,no_run
+use sqlx_mssql_rs_core::MssqlPoolOptions;
 
 let pool = MssqlPoolOptions::new()
     .max_connections(10)
-    .connect("mssql://sa:MyPass@localhost:1433/testdb?trust_certificate=true")
+    .connect("mssql://app:from-your-secret-store@db.example.com:1433/app?trust_certificate=true")
     .await?;
 
 let row = sqlx_core::query::query("SELECT 1")
@@ -137,10 +186,10 @@ The number of `?` markers is always checked against the number of arguments. The
 driver also reports the SQL type of every parameter, so each bound value is
 checked against the type the server inferred:
 
-```rust
+```rust,no_run
 // `users.id` is `uniqueidentifier`, so this is a compile error:
 //   expected `Uuid`, found `&str`
-sqlx_mssql_rs::query!("SELECT description FROM users WHERE id = ?", "not-a-uuid");
+sqlx_mssql_rs_core::query!("SELECT description FROM users WHERE id = ?", "not-a-uuid");
 ```
 
 Types that do not resolve to exactly one Rust type are reported as a count
@@ -151,8 +200,8 @@ numeric types (`decimal`, `money`) and the feature-gated types (`uuid`,
 An explicit cast skips the check for that argument, which is the escape hatch
 when a valid binding is not the type the server inferred:
 
-```rust
-sqlx_mssql_rs::query!("SELECT id FROM users WHERE amount > ?", amount as f64);
+```rust,no_run
+sqlx_mssql_rs_core::query!("SELECT id FROM users WHERE amount > ?", amount as f64);
 ```
 
 The driver type-erases the futures it creates internally, so using the query
@@ -205,9 +254,9 @@ server's own serialization, not WKB. With the `spatial` feature the driver
 decodes and encodes that serialization natively through two wrappers that keep
 the SRID, which `geo_types::Geometry` cannot carry:
 
-```rust
+```rust,no_run
 use geo_types::{Geometry, Point};
-use sqlx_mssql_rs::{MssqlGeography, MssqlGeometry};
+use sqlx_mssql_rs_core::{MssqlGeography, MssqlGeometry};
 
 let point = Geometry::Point(Point::new(1.0, 2.0));
 
@@ -245,7 +294,7 @@ migrations, and preparing offline query data.
 
 ### Install
 
-```bash
+```sh
 cargo install --git https://github.com/strawberyy-coconut/sqlx-mssql-rs.git \
   sqlx-mssql-rs-cli --locked
 ```
@@ -268,7 +317,7 @@ All standard `sqlx-cli` subcommands are supported. Provide your database URL
 via `--database-url` or the `DATABASE_URL` environment variable (or a `.env`
 file; pass `--no-dotenv` to disable that).
 
-```bash
+```sh
 # Create / drop the database
 sqlx-mssql database create
 sqlx-mssql database drop -y
@@ -289,7 +338,7 @@ sqlx-mssql prepare
 
 The same commands work through cargo:
 
-```bash
+```sh
 cargo sqlx-mssql migrate run
 ```
 
@@ -298,14 +347,14 @@ the prompt in scripts.
 
 **Environment variable** (add to `.env` in your project root):
 
-```
-DATABASE_URL=mssql://sa:Password1!@127.0.0.1:1433/my_database?trust_certificate=true
+```text
+DATABASE_URL=mssql://app:from-your-secret-store@127.0.0.1:1433/app?trust_certificate=true
 ```
 
 Or use the `--database-url` flag:
 
-```bash
-sqlx-mssql migrate run --database-url mssql://sa:Password1!@127.0.0.1:1433/my_database
+```sh
+sqlx-mssql migrate run --database-url mssql://app:from-your-secret-store@127.0.0.1:1433/app
 ```
 
 ### Run without installing
@@ -313,7 +362,7 @@ sqlx-mssql migrate run --database-url mssql://sa:Password1!@127.0.0.1:1433/my_da
 From a clone of this repository, the CLI can be run straight from source instead
 of being installed:
 
-```bash
+```sh
 cargo run -p sqlx-mssql-rs-cli -- migrate run
 ```
 
@@ -321,7 +370,7 @@ cargo run -p sqlx-mssql-rs-cli -- migrate run
 
 A commented walk-through lives in `examples/full`:
 
-```bash
+```sh
 cargo run -p full
 ```
 
@@ -331,7 +380,7 @@ rolls back, and exercises each of the query macros. It reads
 
 ## Running Tests
 
-```bash
+```sh
 docker run -e "ACCEPT_EULA=Y" -e "MSSQL_SA_PASSWORD=MyPass" \
   -p 1433:1433 -d mcr.microsoft.com/mssql/server:2022-latest
 
@@ -346,11 +395,16 @@ defaults to `mssql://sa:Password1!@localhost:1433/master?trust_certificate=true`
 Some tests are gated behind type features (`chrono`, `time`, `bstr`), so run the
 whole suite with everything enabled:
 
-```bash
+```sh
 DATABASE_URL="mssql://sa:MyPass@localhost:1433/master?trust_certificate=true" \
   cargo test --workspace --all-features
 ```
-# Local fork notice
+## Local fork notice
 
 This is the upstream README retained for provenance. Its `?` placeholder examples
 do not apply to this fork; see [NEOTALES.md](NEOTALES.md).
+
+## Licence 📜
+
+Apache-2.0, retained from upstream. See [LICENSE-APACHE](LICENSE-APACHE) and
+[NEOTALES.md](NEOTALES.md) for the exact local delta.

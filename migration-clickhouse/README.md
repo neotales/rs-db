@@ -1,5 +1,57 @@
 # neotales-migration-clickhouse
 
+Experimental ClickHouse migration backend over `neotales-dbapi-clickhouse`.
+
+By [x0craft](https://github.com/x0craft).
+
+[![Neotales](https://github.com/neotales/brand/raw/main/assets/logo.png)](https://github.com/neotales/rs-db)
+
+<!-- badges: crates.io, docs.rs, CI. Add once the crate name and first version exist. -->
+
+## Install 📦
+
+```sh
+cargo add neotales-migration neotales-migration-clickhouse --features experimental-native-migrations
+```
+
+## What you can do 🔧
+
+**Opt in explicitly.** Without the `experimental-native-migrations` feature, every operation
+validates locally and then returns `Unsupported` before acquiring a session. Cargo features are
+additive, so an ordinary dependency or `--all-features` can enable this path.
+
+```rust,no_run
+use std::time::Duration;
+use neotales_migration::{Migration, Migrations};
+use neotales_migration_clickhouse::ClickHouseBackend;
+
+async fn migrate(
+    pool: &neotales_dbapi_clickhouse::ClickHousePoolProvider,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let backend = ClickHouseBackend::new("app", "schema_history", Duration::from_secs(5))?;
+    let migrations = Migrations::new(vec![Migration::new(
+        1,
+        "create-users",
+        "CREATE TABLE users (id Int64) ENGINE=MergeTree ORDER BY id",
+        Some("DROP TABLE users".to_owned()),
+    )?])?;
+    backend
+        .up(pool, "app", &migrations, "binding-fingerprint-v1", &["users"])
+        .await?;
+    Ok(())
+}
+```
+
+**Read the recovery contract first.** ClickHouse has no interactive transactions, so schema and
+ledger writes are not atomic. A dirty marker is persisted before each script and recovery is
+manual and exclusive.
+
+**Do not treat a passing run as stability.** The live recovery gate has an unresolved timeout;
+the README's diagnostic section describes the bounded evidence, not a guarantee.
+
+
+## Scope
+
 > **Experimental, disabled by default:** opt in with the Cargo feature
 > `experimental-native-migrations`. Without it, operations return `Error::Database` with
 > `ErrorKind::Unsupported` after local validation and before acquiring a session. Cargo features
@@ -211,7 +263,7 @@ use neotales_migration::{Migration, Migrations};
 use neotales_migration_clickhouse::ClickHouseBackend;
 use std::time::Duration;
 
-# async fn example(pool: &neotales_dbapi_clickhouse::ClickHousePoolProvider) -> Result<(), Box<dyn std::error::Error>> {
+async fn example(pool: &neotales_dbapi_clickhouse::ClickHousePoolProvider) -> Result<(), Box<dyn std::error::Error>> {
 let backend = ClickHouseBackend::new("app", "schema_history", Duration::from_secs(5))?;
 let migrations = Migrations::new(vec![
     Migration::new(1, "create-users", "CREATE TABLE users (id Int64) ENGINE=MergeTree ORDER BY id", Some("DROP TABLE users".to_owned()))?,
@@ -220,7 +272,7 @@ let state = backend
     .up(pool, "app", &migrations, "binding-fingerprint-v1", &["users"])
     .await?;
 assert_eq!(state.applied_count(), 1);
-# Ok(()) }
+Ok(()) }
 ```
 
 The example requires the `experimental-native-migrations` feature. Without it the backend
@@ -236,7 +288,7 @@ no ports, uses a random nonempty password from the OS CSPRNG, and connects throu
 proxy. The default script checks the disabled ordinary dependency build; the experimental lane
 exercises the recovery contract in an enabled ordinary dependency build.
 
-```bash
+```sh
 cargo test -p neotales-migration-clickhouse --all-targets
 migration-clickhouse/tests/live.sh
 migration-clickhouse/tests/live.sh --experimental
@@ -303,7 +355,7 @@ unavailable categories. The diagnostic emits no SQL, packet payloads, credential
 symbols, or server log bodies. It is not a replacement for either live recovery gate or evidence
 of stability when it passes:
 
-```bash
+```sh
 cargo test -p neotales-migration-clickhouse --test live -- \
   --ignored --exact live::memory_lock_lifecycle_without_fault_injection --nocapture
 ```
@@ -316,6 +368,9 @@ numeric-only output. A causal handshake verifies that writer completion is times
 observer cleanup finishes. These tests do not validate ClickHouse's live system-table behavior
 or resolve the intermittent timeout:
 
-```bash
+```sh
 cargo test -p neotales-migration-clickhouse --test live controlled_tests
 ```
+
+## Licence 📜
+MIT. See [LICENSE.md](LICENSE.md).

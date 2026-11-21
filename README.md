@@ -7,8 +7,70 @@ migration backends.
 
 By [x0craft](https://github.com/x0craft).
 
+<!-- badges: crates.io, docs.rs, CI. Add once the crates have a first version. -->
+
 This repository is a virtual Cargo workspace. Every shippable crate has its own
 top-level directory and shares version `0.0.0-alpha.0`.
+
+## What you can do 🔧
+
+**Use one SQL contract across database families.** A provider owns the connection, types, and
+cleanup; application code uses the same traits. Add the contract and one provider:
+
+```sh
+cargo add neotales-dbapi neotales-dbapi-sqlite
+cargo add tokio --features macros,rt-multi-thread
+```
+
+**Open a real SQLite session and read a typed row.** This is a complete program, compiled and run
+by CI as `dbapi-sqlite/examples/connect_and_query.rs`:
+
+```rust
+use neotales_dbapi::{DbType, Parameter, Pool, QueryOptions, RowLimit, Value};
+use neotales_dbapi_sqlite::{SqliteConfig, SqlitePoolProvider};
+
+#[tokio::main]
+async fn main() -> Result<(), neotales_dbapi::DbError> {
+    let provider = SqlitePoolProvider::connect(SqliteConfig::new("app.sqlite")).await?;
+    let mut session = provider.acquire_sqlite().await?;
+    session
+        .execute_async(
+            "CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY, name TEXT NOT NULL)",
+            QueryOptions::new(),
+        )
+        .await?;
+    let insert = [
+        Parameter::new(DbType::I64, Value::I64(7))?,
+        Parameter::new(DbType::Text, Value::Text("Ada".to_owned()))?,
+    ];
+    session
+        .execute_async(
+            "INSERT INTO users (id, name) VALUES (?, ?)",
+            QueryOptions::new().bind_all(&insert),
+        )
+        .await?;
+    let lookup = [Parameter::new(DbType::I64, Value::I64(7))?];
+    let row = session
+        .fetch_one_async(
+            "SELECT name FROM users WHERE id = ?",
+            QueryOptions::new().bind_all(&lookup).limit(RowLimit::new(1, 256)?),
+        )
+        .await?;
+    let name: String = row.read("name")?;
+    assert_eq!(name, "Ada");
+    Ok(())
+}
+```
+
+Run it:
+
+```sh
+cargo run -p neotales-dbapi-sqlite --example connect_and_query
+```
+
+**Wrap policy around any pool.** `neotales_dbapi::PolicyPool` adds opt-in telemetry, SQL capture,
+and replay-safe retries without changing the provider. SQL capture is off by default because
+literals and comments can contain secrets.
 
 ## Crates
 
@@ -97,8 +159,8 @@ order: the transport forks first, then `neotales-dbapi` and
 `neotales-migration`, then the providers, then the migration backends.
 `RELEASE.md` has the exact list and the first-publish procedure.
 
-## Licence
+## Licence 📜
 
-[MIT](LICENSE.md). The forks retain their upstream licences: `klickhouse` and
-`tokio-postgres` are MIT OR Apache-2.0, `neotales-libsql` is MIT, and
+[MIT](LICENSE.md). See [LICENSE.md](LICENSE.md). The forks retain their upstream licences:
+`klickhouse` and `tokio-postgres` are MIT OR Apache-2.0, `neotales-libsql` is MIT, and
 `neotales-sqlx-mssql` is Apache-2.0.

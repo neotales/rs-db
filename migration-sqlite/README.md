@@ -1,18 +1,74 @@
 # neotales-migration-sqlite
 
+Transactional SQLite migration backend over the driver-neutral `neotales_dbapi` SQLite contract.
+
+By [x0craft](https://github.com/x0craft).
+
+[![Neotales](https://github.com/neotales/brand/raw/main/assets/logo.png)](https://github.com/neotales/rs-db)
+
+<!-- badges: crates.io, docs.rs, CI. Add once the crate name and first version exist. -->
+
+## Install 📦
+
+```sh
+cargo add neotales-migration neotales-migration-sqlite
+```
+
+## What you can do 🔧
+
+**Run migrations through either SQLite provider.** The default `sqlx-compat` feature keeps the
+`SqlitePoolProvider` overloads; disable it to use `neotales-dbapi-sqlite-direct` with no `SQLx` in
+the runtime graph.
+
+```rust,no_run
+use std::time::Duration;
+use neotales_dbapi_sqlite_direct::{SqliteConfig, SqlitePoolProvider};
+use neotales_migration::{Migration, Migrations};
+use neotales_migration_sqlite::SqliteBackend;
+
+async fn migrate() -> Result<(), Box<dyn std::error::Error>> {
+    let provider = SqlitePoolProvider::connect(
+        SqliteConfig::new("app.sqlite")
+            .busy_timeout(Duration::from_millis(500))
+            .max_connections(4),
+    )
+    .await?;
+    let backend = SqliteBackend::new("migration_log", 500)?;
+    let migrations = Migrations::new(vec![Migration::new(
+        1,
+        "create_users",
+        "CREATE TABLE users (id INTEGER PRIMARY KEY)",
+        Some("DROP TABLE users".to_owned()),
+    )?])?;
+    backend
+        .up_with_pool(&provider, "users", &migrations, "application-v1", &["users"])
+        .await?;
+    Ok(())
+}
+```
+
+**Choose the provider explicitly.** `up`, `down`, and `flatten` each acquire one exclusive session
+and begin `BEGIN IMMEDIATE` on that same connection.
+
+**Declare managed objects.** Pass the complete list; an unregistered module rejects existing
+objects instead of adopting them.
+
+
+## Scope
+
 SQLite executor for `neotales-migration`, backed by the driver-neutral
 `neotales_dbapi::SqlitePool` contract. The default `sqlx-compat` feature retains
 the `SqlitePoolProvider` overloads; disable default features and call
 `up_with_pool`, `down_with_pool`, and `flatten_with_pool` to use another SQLite
 driver such as `neotales-dbapi-sqlite-direct` without `SQLx` in the runtime graph.
 
-```rust
+```rust,no_run
 use std::time::Duration;
 use neotales_dbapi_sqlite_direct::{SqliteConfig, SqlitePoolProvider};
 use neotales_migration::{Migration, Migrations};
 use neotales_migration_sqlite::SqliteBackend;
 
-# async fn run() -> Result<(), Box<dyn std::error::Error>> {
+async fn run() -> Result<(), Box<dyn std::error::Error>> {
 let database_path = std::env::temp_dir()
     .join(format!("neotales-migration-example-{}.sqlite", std::process::id()));
 let provider = SqlitePoolProvider::connect(
@@ -32,8 +88,8 @@ let migrations = Migrations::new(vec![
 backend.up_with_pool(&provider, "users", &migrations, "application-v1", &["users"]).await?;
 drop(provider);
 std::fs::remove_file(database_path)?;
-# Ok(())
-# }
+Ok(())
+}
 ```
 
 The example uses the direct provider and neutral API, so it also works with
@@ -41,7 +97,7 @@ The example uses the direct provider and neutral API, so it also works with
 `SqliteBackend::up`, `down`, and `flatten` overloads for
 `neotales-dbapi-sqlite::SqlitePoolProvider`.
 
-In this workspace the SQLx-free dependency selection is:
+In this workspace the `SQLx`-free dependency selection is:
 
 ```toml
 [dependencies]
@@ -102,3 +158,6 @@ and head cannot be validated and is rejected; it must not be silently adopted.
 manifest's exact complete prior history and atomically replaces it; it does not
 execute baseline SQL. A fresh module must apply the baseline with `up`; fresh
 `flatten` is rejected even when another module has initialized the ledger.
+
+## Licence 📜
+MIT. See [LICENSE.md](LICENSE.md).

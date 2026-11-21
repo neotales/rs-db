@@ -1,5 +1,58 @@
 # neotales-migration-mssql
 
+Transactional SQL Server 2022 migration backend over `neotales-dbapi-mssql`.
+
+By [x0craft](https://github.com/x0craft).
+
+[![Neotales](https://github.com/neotales/brand/raw/main/assets/logo.png)](https://github.com/neotales/rs-db)
+
+<!-- badges: crates.io, docs.rs, CI. Add once the crate name and first version exist. -->
+
+## Install 📦
+
+```sh
+cargo add neotales-migration neotales-migration-mssql
+```
+
+## What you can do 🔧
+
+**Apply migrations under one transaction-owned application lock.** DDL and ledger writes commit
+together; a failing later batch rolls back earlier batches and ledger writes.
+
+```rust,no_run
+use std::time::Duration;
+use neotales_dbapi_mssql::MssqlPoolProvider;
+use neotales_migration::{Migration, Migrations};
+use neotales_migration_mssql::SqlServerBackend;
+
+async fn migrate(
+    provider: &MssqlPoolProvider,
+    up_sql: String,
+    down_sql: String,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let definitions = Migrations::new(vec![Migration::new(
+        1,
+        "orders",
+        up_sql,
+        Some(down_sql),
+    )?])?;
+    let backend = SqlServerBackend::new("dbo", "migration_history", Duration::from_secs(5))?;
+    backend
+        .up(provider, "orders", &definitions, "application-binding-v1", &[])
+        .await?;
+    Ok(())
+}
+```
+
+**Reconcile a commit error.** A commit error is not proof of rollback. Repeat `up` or
+`initialise_module` with identical definitions; `down(count)` is not idempotent.
+
+**Know the support boundary.** The crate requires SQL Server 2022 (major 16) and is not yet
+accepted for production use; the provider is also unaccepted.
+
+
+## Scope
+
 Transactional SQL Server migrations over [`neotales-dbapi`] and the
 [`neotales-dbapi-mssql`] provider. This alpha crate is **not yet accepted for
 use**: the SQL Server provider itself is unaccepted, and this backend's public
@@ -164,6 +217,5 @@ the provider's `CommitOutcomeUnknown` unchanged; recover by repeating `up` or
 `initialize_module` with identical definitions and binding, never by blindly
 repeating `down`. Flatten is not implemented in this revision.
 
-## License
-
-MIT. See the workspace `LICENSE.md`.
+## Licence 📜
+MIT. See [LICENSE.md](LICENSE.md).

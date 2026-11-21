@@ -11,10 +11,33 @@ that version. Tag `v0.3.1` publishes only if every manifest says
 `version = "0.3.1"`; the `version` job fails the run otherwise. The first
 version in this repository is `0.0.0-alpha.0`.
 
-Bump the version, commit, push, then tag that commit:
+The version appears twice per manifest: once as `[package] version`, and once in
+every internal path dependency as an exact requirement
+(`version = "=X"`). It also appears in dev-dependencies and target-specific
+dependency tables. All of them must move together, including
+`neotales-dbapi-mssql-direct`, which is `publish = false` but is still a
+workspace member whose exact requirements must resolve locally. Do not edit only
+the 23 published manifests: the unpublished member would then fail to build
+against the new local versions.
+
+Run the checked operation instead of editing by hand:
 
 ```sh
-cargo publish -p neotales-klickhouse --dry-run --locked
+python3 eng/version-consistency.py --verify
+python3 eng/version-consistency.py --set 0.3.1
+cargo build --workspace
+git diff --stat
+```
+
+`--verify` fails if any workspace package disagrees or any internal exact
+requirement is not `=X`. `--set` rewrites both forms in all 24 member manifests.
+It deliberately does not touch `neotales-resilience`: that is an external crate
+published from `neotales/rs-retry`, not a path dependency in this repository.
+
+Commit the version change and the updated `Cargo.lock`, push, then tag that
+commit:
+
+```sh
 git tag v0.3.1
 git push origin dev
 git push origin v0.3.1
@@ -118,9 +141,12 @@ every crate is uploaded, not part of any one crate.
 4. Bump to the next version and let tags take over. Do not run `publish.sh` for
    these crates again.
 
-The release run for the first tagged version fails, because the version it would
-publish is already uploaded. The tag is provenance for the first version, not
-its publish trigger. Every later version publishes from its `v*` tag.
+The first tagged run after the manual uploads does not fail on the versions
+already published. Before each upload the publish job asks crates.io whether
+that exact version exists and skips it when it does; a tag whose 23 versions are
+all present therefore completes as a no-op. The tag is provenance for the first
+version, not its publish trigger. Every later version publishes from its `v*`
+tag.
 
 Before the first upload, `cargo publish --dry-run` succeeds only for crates whose
 internal dependencies are all already on the registry. In this repository that
@@ -134,9 +160,15 @@ location searched: crates.io index
 ```
 
 That is the dependency rule, not a packaging fault. The `check` job accepts only
-that expected failure and still fails on a compile, manifest or metadata error.
-The publish job uploads in dependency order and retries while the index catches
-up.
+that expected failure: the missing package must be a workspace sibling whose
+version equals the crate under test, the cause must be the crates.io index, and
+the failure must be a resolution failure. An unpublished external crate, a
+wrong internal requirement, a manifest error, or a tarball verification failure
+fails the job. The same classifier is tested on every CI run by
+`python3 eng/package-preflight.py --self-test`, including the negative cases.
+The publish job uploads in dependency order and retries only the same
+verified index-lag condition, plus HTTP 429. Any other failure stops the run at
+that crate, so a real error cannot be hidden behind 20 retries.
 
 Registry-name availability for the `neotales-*` fork names was unverified at
 import time. Check ownership before the first upload. If a name is taken by
@@ -145,9 +177,18 @@ unowned name.
 
 ## Later releases
 
-1. Bump the version in all 23 publishable manifests and commit it. `Cargo.lock`
-   is committed on purpose, so run `cargo build` and commit the updated lockfile
-   with it. The lockfile is what the scheduled audit checks.
+1. Set the new version in every workspace member manifest, including every
+   internal exact dependency requirement:
+
+   ```sh
+   python3 eng/version-consistency.py --set X.Y.Z
+   python3 eng/version-consistency.py --verify
+   cargo build --workspace
+   ```
+
+   `Cargo.lock` is committed on purpose, so commit the updated lockfile with the
+   manifests. The lockfile is what the scheduled audit checks. Do not change the
+   external `neotales-resilience` pin as part of this repository's bump.
 2. Push the commit.
 3. Tag it `vX.Y.Z` and push the tag.
 4. The workflow runs the checks and dry runs, then publishes in order. One OIDC
@@ -163,6 +204,30 @@ After the manual first upload is done, switch each crate to Trusted Publishing
 Only mode on crates.io. That rejects token publishes everywhere, so a token
 cannot publish these crates later.
 
+### Partial runs and retries
+
+Publishing 23 crates is not atomic. The job publishes in order and stops at the
+first crate that fails. That leaves a prefix of the version on crates.io. A
+re-run is the supported recovery: it skips the uploaded prefix and starts again
+at the failed crate. The intended sequence is always
+
+```text
+check -> version -> publish in order -> skip existing -> retry index lag -> stop on a real error
+```
+
+Do not bump the version because a run was interrupted. Bump only when the
+content already uploaded is wrong, or when a crate is structurally unpublishable
+at that version; then the whole workspace moves to a new version and the old
+partial set stays as an immutable record.
+
+Two failure classes need different handling:
+
+- **Not uploaded.** The job reports a normal `cargo publish` error. Fix the
+  cause, then re-run the job. No version bump is involved.
+- **Uploaded, but the run failed later.** The version exists on crates.io and
+  cannot be replaced. Re-run; the job sees it and skips it. If the uploaded
+  bytes are wrong, bump the version for every crate and release again.
+
 ## What is not allowed
 
 - `pull_request_target` and `workflow_run` are not used anywhere, and must not be
@@ -170,8 +235,9 @@ cannot publish these crates later.
 - No long-lived crates.io token in GitHub secrets for this workflow. The publish
   job reads `id-token: write` and nothing else.
 - No publishing from a branch. The tag check exists so the artifact has a name.
-- No republishing a version. crates.io rejects it. If a publish fails after the
-  upload was accepted, bump the patch version and release again.
+- No republishing a version. crates.io rejects it. A re-run of the workflow
+  skips a version that is already present; if the uploaded content itself was
+  wrong, bump the shared version and release it as a new version.
 - No `[patch]`, local registry or unversioned path dependency to make a packaging
   check pass. It would not describe what crates.io receives.
 
@@ -179,9 +245,10 @@ cannot publish these crates later.
 
 | Symptom | Cause |
 | --- | --- |
-| `version` job: tag does not match `vX.Y.Z` | A manifest version and the tag disagree, or the manifests disagree. Delete the tag, fix, re-tag. |
-| `check` job: dry run fails with `no matching package named` | An internal dependency is not on crates.io yet. Expected before the first upload and on a releasing commit; the publish job handles it. Any other dry-run error fails the job. |
+| `version` job: tag does not match `vX.Y.Z` | A manifest version and the tag disagree, or the manifests disagree. Delete the tag, run `eng/version-consistency.py --set`, fix, re-tag. |
+| `version` job: internal requirement mismatch | `eng/version-consistency.py --verify` found a path dependency whose exact version differs from the package version. Run `--set` and commit every manifest. |
+| `check` job: dry run fails with `no matching package named` | An internal dependency is not on crates.io yet. Expected before the first upload and on a releasing commit; the publish job handles it. The classifier rejects an unpublished external crate, a wrong requirement version, or a non-index cause. |
 | Publish job: OIDC exchange fails | The crate does not exist yet, or the trusted publisher does not match: wrong repository, wrong workflow filename, or an environment name set on one side only. |
-| Publish job: version already uploaded | The version was published before, usually by the manual first release. Bump the version. |
+| Publish job: version already uploaded | The version was published before, usually by the manual first release or an earlier partial run. The job skips it. Do not bump the version unless the uploaded content is wrong. |
 | Publish job: `cargo publish` rejects the token | Trusted Publishing Only mode is on and the crate has no trusted publisher configured. |
 | Publish job: cannot select a sibling version | Index lag after the previous upload. The job retries for a few minutes. If it still fails, confirm the version is on crates.io and re-run the job. A re-run skips versions already uploaded. Do not publish that version by hand again. |

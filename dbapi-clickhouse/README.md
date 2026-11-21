@@ -1,5 +1,54 @@
 # neotales-dbapi-clickhouse
 
+Native-protocol ClickHouse provider for `neotales-dbapi`, pinned to ClickHouse 24.8 LTS.
+
+By [x0craft](https://github.com/x0craft).
+
+[![Neotales](https://github.com/neotales/brand/raw/main/assets/logo.png)](https://github.com/neotales/rs-db)
+
+<!-- badges: crates.io, docs.rs, CI. Add once the crate name and first version exist. -->
+
+## Install 📦
+
+```sh
+cargo add neotales-dbapi neotales-dbapi-clickhouse
+```
+
+## What you can do 🔧
+
+**Fetch a bounded result over verified native TLS.** The connector verifies the certificate chain
+and host name against the CA bundle you supply. There is no insecure TLS mode.
+
+```rust,no_run
+use neotales_dbapi::{Pool, QueryOptions, RowLimit};
+use neotales_dbapi_clickhouse::{ClickHouseConfig, ClickHousePoolProvider};
+
+async fn query() -> Result<(), neotales_dbapi::DbError> {
+    let config = ClickHouseConfig::new("clickhouse.example", 9440, "app", "app")
+        .password("from-your-secret-store")
+        .ca_file("/etc/ssl/private-ca.pem");
+    let provider = ClickHousePoolProvider::connect(config).await?;
+    let rows = provider
+        .fetch_all_async(
+            "SELECT number FROM numbers(3)",
+            QueryOptions::new().limit(RowLimit::new(10, 4096)?),
+        )
+        .await?;
+    assert_eq!(rows.len(), 3);
+    Ok(())
+}
+```
+
+**Write without inventing a count.** `execute_no_count` returns `()` only after the native
+`EndOfStream` packet. It is the only write path; `execute_async`, scripts, and transactions are
+`Unsupported` before dispatch.
+
+**Page with native parameters.** The caller-authored SQL uses `{pN:Type}` placeholders; the pager
+supplies a hard row/byte bound plus one lookahead row and never rewrites the statement.
+
+
+## Scope
+
 Native-protocol (`TCP 9000`/`9440`) ClickHouse provider for the driver-neutral
 [`neotales-dbapi`](https://docs.rs/neotales-dbapi) contract.
 
@@ -164,7 +213,7 @@ statement against the crate's digest-pinned ClickHouse 24.8 container. It covers
 and single-tenant scans, native `{pN:Type}` parameters, one-row lookahead, exact page order, and
 request counts. `cargo test` stays fixture-free; select only this test with:
 
-```bash
+```sh
 cargo test -p neotales-dbapi-clickhouse --test live -- --ignored --exact clickhouse_sql_page_source_contract
 ```
 
@@ -241,12 +290,12 @@ servers and other ClickHouse versions are not supported and must not be assumed 
 
 ## Example
 
-```no_run
+```rust,no_run
 use std::time::Duration;
 use neotales_dbapi::{DbType, Parameter, Pool, RowLimit, Value};
 use neotales_dbapi_clickhouse::{ClickHouseConfig, ClickHousePoolProvider};
 
-# async fn example() -> Result<(), neotales_dbapi::DbError> {
+async fn example() -> Result<(), neotales_dbapi::DbError> {
 let provider = ClickHousePoolProvider::connect(
     ClickHouseConfig::plaintext_loopback("127.0.0.1", 9000, "default", "app")
         .expect("loopback configuration")
@@ -260,9 +309,9 @@ let rows = provider.fetch_all_async(
         .bind_all(&parameters)
         .limit(RowLimit::new(10, 4096)?),
 ).await?;
-# let _ = rows;
-# Ok(())
-# }
+let _ = rows;
+Ok(())
+}
 ```
 
 For verified TLS, use `ClickHouseConfig::new("clickhouse.example", 9440, "app", "app")` with
@@ -270,7 +319,7 @@ For verified TLS, use `ClickHouseConfig::new("clickhouse.example", 9440, "app", 
 
 ## Testing
 
-```bash
+```sh
 cargo test -p neotales-dbapi-clickhouse --all-targets
 dbapi-clickhouse/tests/live.sh
 ```
@@ -298,6 +347,5 @@ add the validated parameter path used here. The crate is pinned by path and is n
 ClickHouse SDK recommendation. See `klickhouse/NEOTALES-PROTOTYPE.md` for the exact scope and
 remaining decode/allocation caveats.
 
-## License
-
-MIT. See the workspace `LICENSE.md`.
+## Licence 📜
+MIT. See [LICENSE.md](LICENSE.md).

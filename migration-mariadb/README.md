@@ -1,5 +1,55 @@
 # neotales-migration-mariadb
 
+MariaDB 11.4 migration backend with explicit dirty-marker recovery.
+
+By [x0craft](https://github.com/x0craft).
+
+[![Neotales](https://github.com/neotales/brand/raw/main/assets/logo.png)](https://github.com/neotales/rs-db)
+
+<!-- badges: crates.io, docs.rs, CI. Add once the crate name and first version exist. -->
+
+## Install 📦
+
+```sh
+cargo add neotales-migration neotales-migration-mariadb
+```
+
+## What you can do 🔧
+
+**Apply a migration set with a persisted dirty marker.** MariaDB implicitly commits most DDL, so
+schema and ledger writes are not promised atomic.
+
+```rust,no_run
+use std::time::Duration;
+use neotales_migration::{Migration, Migrations};
+use neotales_migration_mariadb::MariaDbBackend;
+
+async fn migrate(
+    pool: &neotales_dbapi_mariadb::MariaDbPoolProvider,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let backend = MariaDbBackend::new("app", "schema_history", Duration::from_secs(5))?;
+    let migrations = Migrations::new(vec![Migration::new(
+        1,
+        "create-users",
+        "CREATE TABLE users (id BIGINT PRIMARY KEY)",
+        Some("DROP TABLE users".to_owned()),
+    )?])?;
+    backend
+        .up(pool, "app", &migrations, "binding-fingerprint-v1", &["users"])
+        .await?;
+    Ok(())
+}
+```
+
+**Reconcile before retrying.** Inspect the real schema and ledger with `state`, then call
+`reconcile`. A dirty marker blocks further automated operations until it is resolved.
+
+**Serialise writers with `GET_LOCK`.** The lock is named from the `database.table` pair and held
+for the whole operation.
+
+
+## Scope
+
 MariaDB backend for [`neotales-migration`] over [`neotales-dbapi`]. It is tested
 against MariaDB 11.4 (LTS) only. MySQL compatibility is not claimed; MySQL has
 its own backend and test lane.
@@ -119,7 +169,7 @@ use neotales_migration::{Migration, Migrations};
 use neotales_migration_mariadb::MariaDbBackend;
 use std::time::Duration;
 
-# async fn example(pool: &neotales_dbapi_mariadb::MariaDbPoolProvider) -> Result<(), Box<dyn std::error::Error>> {
+async fn example(pool: &neotales_dbapi_mariadb::MariaDbPoolProvider) -> Result<(), Box<dyn std::error::Error>> {
 let backend = MariaDbBackend::new("app", "schema_history", Duration::from_secs(5))?;
 let migrations = Migrations::new(vec![
     Migration::new(1, "create-users", "CREATE TABLE users (id BIGINT PRIMARY KEY)", Some("DROP TABLE users".to_owned()))?,
@@ -128,7 +178,7 @@ let state = backend
     .up(pool, "app", &migrations, "binding-fingerprint-v1", &["users"])
     .await?;
 assert_eq!(state.applied_count(), 1);
-# Ok(()) }
+Ok(()) }
 ```
 
 `initialize_module` registers without running SQL. `state` returns `None` for an
@@ -157,7 +207,7 @@ from the OS CSPRNG, and connects through a loopback-only proxy. It covers:
 - dirty markers whose present version is not the history head, or whose absent
   version is not exactly the next position, rejected without clearing.
 
-```bash
+```sh
 cargo test -p neotales-migration-mariadb --all-targets
 migration-mariadb/tests/live.sh
 ```
@@ -165,3 +215,6 @@ migration-mariadb/tests/live.sh
 The configured ledger database must match the selected database on the locked
 physical session. A mismatch returns `Error::Configuration` before ledger access
 or script execution.
+
+## Licence 📜
+MIT. See [LICENSE.md](LICENSE.md).

@@ -1,5 +1,58 @@
 # neotales-dbapi-libsql
 
+Remote libSQL/Turso provider for `neotales-dbapi` over the Hrana HTTP protocol.
+
+By [x0craft](https://github.com/x0craft).
+
+[![Neotales](https://github.com/neotales/brand/raw/main/assets/logo.png)](https://github.com/neotales/rs-db)
+
+<!-- badges: crates.io, docs.rs, CI. Add once the crate name and first version exist. -->
+
+## Install 📦
+
+```sh
+cargo add neotales-dbapi neotales-dbapi-libsql
+```
+
+## What you can do 🔧
+
+**Connect to Turso Cloud or a self-hosted `sqld`.** `LibsqlConfig::remote` accepts `libsql://` and
+`https://` only and verifies the server certificate and host name.
+
+```rust,no_run
+use std::time::Duration;
+use neotales_dbapi::{DbType, Parameter, Pool, QueryOptions, RowLimit, Value};
+use neotales_dbapi_libsql::{LibsqlConfig, LibsqlPoolProvider};
+
+async fn query() -> Result<(), neotales_dbapi::DbError> {
+    let provider = LibsqlPoolProvider::connect(
+        LibsqlConfig::remote("libsql://example.turso.io", "from-your-secret-store")
+            .max_connections(4)
+            .acquire_timeout(Duration::from_secs(5)),
+    )
+    .await?;
+
+    let params = [Parameter::new(DbType::I64, Value::I64(7))?];
+    let rows = provider
+        .fetch_all_async(
+            "SELECT name FROM users WHERE id = ?",
+            QueryOptions::new().bind_all(&params).limit(RowLimit::new(10, 4096)?),
+        )
+        .await?;
+    let _ = rows;
+    Ok(())
+}
+```
+
+**Keep the driver out of your public API.** The provider accepts SQLite `?` and `?NNN`
+placeholders, returns detached rows, and maps remote failures to sanitized `DbError` kinds.
+
+**Reconcile unknown commits explicitly.** A dropped `commit_async` future, or an error from it, is
+not proof of rollback. The outcome is reported as unknown and is never retried automatically.
+
+
+## Scope
+
 Remote libSQL/Turso implementation of the driver-neutral
 [`neotales-dbapi`](https://docs.rs/neotales-dbapi) contract. The public API does
 not expose libSQL types.
@@ -74,7 +127,7 @@ against the existing digest-pinned remote libSQL `sqld` fixture. It covers the c
 single-tenant scans, typed parameters, one-row lookahead, exact page order, and request counts.
 `cargo test` stays fixture-free; select only this test with:
 
-```bash
+```sh
 cargo test -p neotales-dbapi-libsql --test sqld -- --ignored --exact sqld_sql_page_source_contract
 ```
 
@@ -154,12 +207,12 @@ sanitized telemetry and explicit replay-safe retries with a caller-supplied
 
 ## Example
 
-```no_run
+```rust,no_run
 use std::time::Duration;
 use neotales_dbapi::{DbType, Parameter, Pool, QueryOptions, RowLimit, Value};
 use neotales_dbapi_libsql::{LibsqlConfig, LibsqlPoolProvider};
 
-# async fn example() -> Result<(), neotales_dbapi::DbError> {
+async fn example() -> Result<(), neotales_dbapi::DbError> {
 let provider = LibsqlPoolProvider::connect(
     LibsqlConfig::remote("libsql://example.turso.io", "from-your-own-secret-store")
         .max_connections(4)
@@ -173,7 +226,7 @@ let rows = provider.fetch_all_async(
 if let Some(row) = rows.first() {
     println!("{:?}", row.get::<Option<String>>("name")?);
 }
-# Ok(()) }
+Ok(()) }
 ```
 
 ## Testing
@@ -183,7 +236,7 @@ contract is `#[ignore]`d and starts a digest-pinned `ghcr.io/tursodatabase/libsq
 container through the Docker CLI. The exact image digest must already be present
 locally; the test does not pull images:
 
-```bash
+```sh
 dbapi-libsql/tests/live.sh
 ```
 
@@ -200,6 +253,5 @@ verified TLS against a local `sqld` (the disposable server is cleartext), a real
 commit-unknown event, or server-side constraint classification (the vendor drops
 the code).
 
-## License
-
-MIT. See the workspace `LICENSE.md`.
+## Licence 📜
+MIT. See [LICENSE.md](LICENSE.md).

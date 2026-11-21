@@ -36,15 +36,15 @@ being transactional. A dispatched failure or interruption is an unknown
 outcome and discards the connection; it does not itself prove rollback.
 
 ```rust,no_run
-# use neotales_dbapi_mssql_direct::provider::DirectPool;
-# use neotales_dbapi::{Pool, QueryOptions, TxOptions};
-# async fn example(pool: &DirectPool) -> Result<(), Box<dyn std::error::Error>> {
+use neotales_dbapi_mssql_direct::provider::DirectPool;
+use neotales_dbapi::{Pool, QueryOptions, TxOptions};
+async fn example(pool: &DirectPool) -> Result<(), Box<dyn std::error::Error>> {
 let mut session = pool.acquire_async().await?;
 let mut tx = session.begin_async(TxOptions::default()).await?;
 tx.execute_trusted_script_async("CREATE TABLE example ( n BIGINT )\rGO\rINSERT INTO example VALUES (1)", QueryOptions::new()).await?;
 tx.rollback_async().await?;
-# Ok(())
-# }
+Ok(())
+}
 ```
 `DirectPool::begin_locked` offers an experimental transaction-owned application
 lock on the same exclusive connection. It invokes `sp_getapplock` through a
@@ -61,14 +61,14 @@ acquisition uses the pool deadline, while BEGIN and network I/O need a
 caller-enforced total deadline. For example, with a Tokio runtime:
 
 ```rust,no_run
-# use neotales_dbapi_mssql_direct::provider::DirectPool;
-# use std::time::Duration;
-# async fn example(pool: &DirectPool) -> Result<(), Box<dyn std::error::Error>> {
+use neotales_dbapi_mssql_direct::provider::DirectPool;
+use std::time::Duration;
+async fn example(pool: &DirectPool) -> Result<(), Box<dyn std::error::Error>> {
 let locked = tokio::time::timeout(Duration::from_secs(5), pool.begin_locked("job", 1000)).await??;
 // `locked` may execute the supported trusted-script subset before rollback.
 locked.rollback().await?;
-# Ok(())
-# }
+Ok(())
+}
 ```
 
 Dropping the acquisition future or handle discards the connection; a cancelled
@@ -243,15 +243,15 @@ use std::{net::SocketAddrV4, time::Duration};
 use neotales_dbapi_mssql_direct::{ExclusivePool, provider::DirectPool};
 use mssql_tds::connection::client_context::ClientContext;
 use neotales_dbapi::{Pool, QueryOptions, Parameter, DbType, Value};
-# async fn demo(context: ClientContext, address: SocketAddrV4) -> Result<(), Box<dyn std::error::Error>> {
+async fn demo(context: ClientContext, address: SocketAddrV4) -> Result<(), Box<dyn std::error::Error>> {
 let owner = ExclusivePool::new(context, address, 4, Duration::from_secs(5))
     .map_err(|_| "invalid pool configuration")?;
 let pool = DirectPool::new(owner);
 let value = Parameter::new(DbType::I64, Value::I64(42))?;
 let row = pool.fetch_one_async("SELECT @P1 AS answer", QueryOptions::new().bind(value)).await?;
 assert_eq!(row.get::<i64>("answer")?, 42);
-# Ok(())
-# }
+Ok(())
+}
 ```
 
 ## Paging source
@@ -267,7 +267,7 @@ low-level `Probe` because this provider's `execute_async` grammar is intentional
 pages through `DirectPool`. It covers cross-tenant and single-tenant keyset pages, typed parameters,
 one-row lookahead, exact page order, and request counts. Select it with:
 
-```bash
+```sh
 cargo test -p neotales-dbapi-mssql-direct --lib live::direct_sql_page_source_live -- --ignored --exact --nocapture
 ```
 

@@ -1,5 +1,58 @@
 # neotales-dbapi-mysql
 
+MySQL 8.4 provider for `neotales-dbapi`, with no `SQLx` type in the public API.
+
+By [x0craft](https://github.com/x0craft).
+
+[![Neotales](https://github.com/neotales/brand/raw/main/assets/logo.png)](https://github.com/neotales/rs-db)
+
+<!-- badges: crates.io, docs.rs, CI. Add once the crate name and first version exist. -->
+
+## Install 📦
+
+```sh
+cargo add neotales-dbapi neotales-dbapi-mysql
+```
+
+## What you can do 🔧
+
+**Connect with verified TLS and query with native `?` parameters.**
+
+```rust,no_run
+use std::time::Duration;
+use neotales_dbapi::{DbType, Parameter, Pool, QueryOptions, RowLimit, Value};
+use neotales_dbapi_mysql::{MySqlConfig, MySqlPoolProvider};
+
+async fn query() -> Result<(), neotales_dbapi::DbError> {
+    let provider = MySqlPoolProvider::connect(
+        MySqlConfig::new("db.example.com", 3306, "app", "app")
+            .password("from-your-secret-store")
+            .max_connections(4)
+            .acquire_timeout(Duration::from_secs(3)),
+    )
+    .await?;
+    let params = [Parameter::new(DbType::I64, Value::I64(7))?];
+    let rows = provider
+        .fetch_all_async(
+            "SELECT name FROM users WHERE id = ?",
+            QueryOptions::new().bind_all(&params).limit(RowLimit::new(10, 4096)?),
+        )
+        .await?;
+    let _ = rows;
+    Ok(())
+}
+```
+
+**Get a concrete session when you own a named lock.** `acquire_mysql_session` returns a session
+with `discard()`, so an unreleased `GET_LOCK` closes its physical connection instead of returning
+to the pool.
+
+**Do not treat `TINYINT(1)` as a boolean.** It decodes as `I64`; `Bool` parameters bind as 0/1 and
+do not round-trip as `Bool`.
+
+
+## Scope
+
 `MySQL` implementation of the driver-neutral [`neotales_dbapi`] contract. The
 public API does not expose `SQLx` types.
 
@@ -23,7 +76,7 @@ It connects to the container bridge address through a listener bound to
 committed credential or a time/PID value. The test is `#[ignore]`d so a fixture-free
 `cargo test` does not need Docker:
 
-```bash
+```sh
 cargo test -p neotales-dbapi-mysql --all-targets
 dbapi-mysql/tests/live.sh
 ```
@@ -107,7 +160,7 @@ against the crate's digest-pinned MySQL 8.4 container. It covers the cross-tenan
 scans, typed parameters, one-row lookahead, exact page order, and request counts. `cargo test` stays
 fixture-free; select only this test with:
 
-```bash
+```sh
 cargo test -p neotales-dbapi-mysql --test mysql -- --ignored --exact mysql_sql_page_source_contract
 ```
 
@@ -232,12 +285,12 @@ in `PolicyPool` for telemetry and explicit replay-safe retries.
 
 ## Example
 
-```no_run
+```rust,no_run
 use std::time::Duration;
 use neotales_dbapi::{DbType, Parameter, Pool, QueryOptions, RowLimit, Value};
 use neotales_dbapi_mysql::{MySqlConfig, MySqlPoolProvider};
 
-# async fn example() -> Result<(), neotales_dbapi::DbError> {
+async fn example() -> Result<(), neotales_dbapi::DbError> {
 let provider = MySqlPoolProvider::connect(
     MySqlConfig::new("db.example.com", 3306, "app", "app")
         .password("from-your-own-secret-store")
@@ -252,13 +305,13 @@ let rows = provider.fetch_all_async(
 if let Some(row) = rows.first() {
     println!("{:?}", row.get::<Option<String>>("name")?);
 }
-# Ok(()) }
+Ok(()) }
 ```
-
-## License
-
-MIT. See the workspace `LICENSE.md`.
 
 `USE` statements are rejected, including inside trusted scripts, to prevent
 database selection from leaking to another pool borrower. Executable comments
 and indirect execution are also rejected.
+
+## Licence 📜
+
+MIT. See [LICENSE.md](LICENSE.md).

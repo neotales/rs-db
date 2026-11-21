@@ -1,5 +1,57 @@
 # neotales-dbapi-sqlite-direct
 
+SQLite provider for `neotales-dbapi` built directly on `rusqlite`, with no SQLx in its graph.
+
+By [x0craft](https://github.com/x0craft).
+
+[![Neotales](https://github.com/neotales/brand/raw/main/assets/logo.png)](https://github.com/neotales/rs-db)
+
+<!-- badges: crates.io, docs.rs, CI. Add once the crate name and first version exist. -->
+
+## Install 📦
+
+```sh
+cargo add neotales-dbapi neotales-dbapi-sqlite-direct
+```
+
+## What you can do 🔧
+
+**Use the same DBAPI traits over rusqlite.** Each physical connection is owned by one blocking
+worker thread; async callers await a reply instead of blocking the executor.
+
+```rust,no_run
+use std::time::Duration;
+use neotales_dbapi::{Pool, QueryOptions, RowLimit};
+use neotales_dbapi_sqlite_direct::{SqliteConfig, SqlitePoolProvider};
+
+async fn query() -> Result<(), neotales_dbapi::DbError> {
+    let provider = SqlitePoolProvider::connect(
+        SqliteConfig::new("app.sqlite")
+            .busy_timeout(Duration::from_secs(2))
+            .max_connections(4),
+    )
+    .await?;
+    let mut session = provider.acquire_async().await?;
+    let row = session
+        .fetch_one_async(
+            "SELECT 1 AS answer",
+            QueryOptions::new().limit(RowLimit::new(1, 64)?),
+        )
+        .await?;
+    assert_eq!(row.get::<i64>("answer")?, 1);
+    Ok(())
+}
+```
+
+**Keep SQLx out of the runtime graph.** `bundled` compiles the vendored SQLite source by default;
+`eng/check-sqlite-no-sqlx.sh` verifies the normal dependency graph.
+
+**Choose a session only when you need the concrete API.** `acquire_sync_sqlite` and
+`begin_immediate` are the synchronous counterparts; the trait paths stay driver-neutral.
+
+
+## Scope
+
 SQLite provider for `neotales-dbapi`, built directly on [`rusqlite`](https://crates.io/crates/rusqlite)
 instead of `SQLx`. It implements the same asynchronous and synchronous traits, option types, rows,
 limits, and sanitized errors; no `SQLx` crate appears anywhere in its dependency graph.
@@ -37,12 +89,12 @@ enabled.
 
 ## Usage
 
-```rust
+```rust,no_run
 use std::time::Duration;
 use neotales_dbapi::{DbError, Pool, QueryOptions, RowLimit, Session};
 use neotales_dbapi_sqlite_direct::{SqliteConfig, SqlitePoolProvider};
 
-# async fn example() -> Result<(), DbError> {
+async fn example() -> Result<(), DbError> {
 let provider = SqlitePoolProvider::connect(
     SqliteConfig::new("app.sqlite")
         .busy_timeout(Duration::from_secs(2))
@@ -57,8 +109,8 @@ let row = session
     )
     .await?;
 assert_eq!(row.get::<i64>("answer")?, 1);
-# Ok(())
-# }
+Ok(())
+}
 ```
 
 Synchronous-only callers use `SqlitePoolProvider::connect_sync`, `acquire_sync_sqlite`, and the
@@ -225,3 +277,6 @@ Tests use unique `tempfile` databases and need no database server.
   produced from the vendored source. Windows and macOS use the same `cc` path but were not
   executed in this environment; the only platform-specific code is the Unix device/inode
   refinement of the durable file identity.
+
+## Licence 📜
+MIT. See [LICENSE.md](LICENSE.md).

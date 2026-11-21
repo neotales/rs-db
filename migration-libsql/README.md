@@ -1,5 +1,60 @@
 # neotales-migration-libsql
 
+Transactional migration backend for remote libSQL/Turso over `neotales-dbapi-libsql`.
+
+By [x0craft](https://github.com/x0craft).
+
+[![Neotales](https://github.com/neotales/brand/raw/main/assets/logo.png)](https://github.com/neotales/rs-db)
+
+<!-- badges: crates.io, docs.rs, CI. Add once the crate name and first version exist. -->
+
+## Install 📦
+
+```sh
+cargo add neotales-migration neotales-migration-libsql
+```
+
+## What you can do 🔧
+
+**Run up, down, and flatten against a remote libSQL database.** Each operation acquires one
+exclusive session, starts `BEGIN IMMEDIATE`, and commits ledger and schema work together.
+
+```rust,no_run
+use std::time::Duration;
+use neotales_dbapi_libsql::{LibsqlConfig, LibsqlPoolProvider};
+use neotales_migration::{Migration, Migrations};
+use neotales_migration_libsql::LibsqlBackend;
+
+async fn migrate() -> Result<(), Box<dyn std::error::Error>> {
+    let provider = LibsqlPoolProvider::connect(
+        LibsqlConfig::remote("libsql://example.turso.io", "from-your-secret-store")
+            .max_connections(4)
+            .acquire_timeout(Duration::from_secs(5)),
+    )
+    .await?;
+    let backend = LibsqlBackend::new("migration_log")?;
+    let migrations = Migrations::new(vec![Migration::new(
+        1,
+        "create_users",
+        "CREATE TABLE users (id INTEGER PRIMARY KEY)",
+        Some("DROP TABLE users".to_owned()),
+    )?])?;
+    backend
+        .up(&provider, "users", &migrations, "application-v1", &["users"])
+        .await?;
+    Ok(())
+}
+```
+
+**Treat an interrupted commit as unknown.** Remote rollback is best effort. Use `inspect` under
+external coordination; do not retry blindly.
+
+**Declare every managed object.** An unregistered module rejects listed pre-existing objects
+rather than adopting schema.
+
+
+## Scope
+
 Transactional migration executor for `neotales-migration` over a remote
 libSQL/Turso database. It uses `neotales-dbapi-libsql`, so the public API accepts
 a `LibsqlPoolProvider`; no libSQL driver type is exposed.
@@ -14,7 +69,7 @@ use neotales_dbapi_libsql::{LibsqlConfig, LibsqlPoolProvider};
 use neotales_migration::{Migration, Migrations};
 use neotales_migration_libsql::LibsqlBackend;
 
-# async fn run() -> Result<(), Box<dyn std::error::Error>> {
+async fn run() -> Result<(), Box<dyn std::error::Error>> {
 let provider = LibsqlPoolProvider::connect(
     LibsqlConfig::remote("libsql://example.turso.io", "from-your-own-secret-store")
         .max_connections(4)
@@ -32,8 +87,8 @@ let migrations = Migrations::new(vec![
 backend
     .up(&provider, "users", &migrations, "application-v1", &["users"])
     .await?;
-# Ok(())
-# }
+Ok(())
+}
 ```
 
 The backend is remote-only, matching the provider. It does not use a local file,
@@ -178,7 +233,7 @@ through a loopback proxy. It is `#[ignore]`d so a fixture-free `cargo test` does
 not need Docker. The exact digest must already exist locally; the test does not
 pull images:
 
-```bash
+```sh
 cargo test -p neotales-migration-libsql --all-targets
 migration-libsql/tests/live.sh
 ```
@@ -198,3 +253,6 @@ verified TLS to `sqld` (the disposable server speaks cleartext through the
 provider's loopback exception), or all possible commit-loss timing windows.
 Those remain integration environments for the application, not claims of this
 test.
+
+## Licence 📜
+MIT. See [LICENSE.md](LICENSE.md).

@@ -1,13 +1,148 @@
 # neotales-dbapi
 
-Provider crates in this workspace include `neotales-dbapi-sqlite`,
-`neotales-dbapi-postgres`, `neotales-dbapi-mysql`, and `neotales-dbapi-mariadb`.
-See each provider's README for supported operations, transport security, and
-live-test prerequisites.
+Driver-neutral SQL execution with bounded row access for asynchronous and blocking callers.
 
-Driver-neutral SQL execution with bounded, reader-based row access in both asynchronous and
-synchronous forms. The default build contains no query builder, ORM, runtime, SQLx dependency, or
-provider; the optional `blocking` adapter owns dedicated worker runtimes.
+By [x0craft](https://github.com/x0craft).
+
+[![Neotales](https://github.com/neotales/brand/raw/main/assets/logo.png)](https://github.com/neotales/rs-db)
+
+<!-- badges: crates.io, docs.rs, CI. Add once the crate name and first version exist. -->
+
+## Install 📦
+
+`neotales-dbapi` is the contract, not a driver. Add it together with a provider:
+
+```sh
+cargo add neotales-dbapi neotales-dbapi-sqlite
+cargo add tokio --features macros,rt-multi-thread
+```
+
+Replace `neotales-dbapi-sqlite` with `neotales-dbapi-postgres`, `neotales-dbapi-mysql`,
+`neotales-dbapi-mariadb`, `neotales-dbapi-mssql`, `neotales-dbapi-clickhouse`, or
+`neotales-dbapi-libsql` when that is the database you use. The provider crate owns the
+connection constructor and depends on `neotales-dbapi`. The reverse dependency would be a
+cycle, so this crate cannot ship the SQLite program as its own example; the runnable copy is
+[`dbapi-sqlite/examples/connect_and_query.rs`](../dbapi-sqlite/examples/connect_and_query.rs),
+compiled by CI and run with:
+
+```sh
+cargo run -p neotales-dbapi-sqlite --example connect_and_query
+```
+
+## What you can do 🔧
+
+**Open a real SQLite connection, create a table, and read a typed row.** This is a complete
+program, not a session that appears from nowhere. The provider is the SQLite package; the
+traits come from this crate.
+
+```rust
+use neotales_dbapi::{DbError, DbType, Parameter, QueryOptions, RowLimit, Value};
+use neotales_dbapi_sqlite::{SqliteConfig, SqlitePoolProvider};
+
+#[tokio::main]
+async fn main() -> Result<(), DbError> {
+    let provider = SqlitePoolProvider::connect(
+        SqliteConfig::new("app.sqlite")
+            .busy_timeout(std::time::Duration::from_secs(2))
+            .max_connections(2),
+    )
+    .await?;
+
+    let mut session = provider.acquire_sqlite().await?;
+    session
+        .execute_async(
+            "CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL, active INTEGER NOT NULL)",
+            QueryOptions::new(),
+        )
+        .await?;
+
+    let insert = [
+        Parameter::new(DbType::I64, Value::I64(7))?,
+        Parameter::new(DbType::Text, Value::Text("Ada".to_owned()))?,
+        // SQLite has no boolean storage class; bind the flag as integer 0/1.
+        Parameter::new(DbType::Bool, Value::Bool(true))?,
+    ];
+    session
+        .execute_async(
+            "INSERT INTO users (id, name, active) VALUES (?, ?, ?)",
+            QueryOptions::new().bind_all(&insert),
+        )
+        .await?;
+
+    let lookup = [Parameter::new(DbType::I64, Value::I64(7))?];
+    let row = session
+        .fetch_one_async(
+            "SELECT name, active FROM users WHERE id = ?",
+            QueryOptions::new()
+                .bind_all(&lookup)
+                .limit(RowLimit::new(1, 256)?),
+        )
+        .await?;
+
+    let name: String = row.read("name")?;
+    // A fetched SQLite integer is I64, not Bool. Decode it as an integer.
+    let active: i64 = row.read("active")?;
+    assert_eq!(name, "Ada");
+    assert_eq!(active, 1);
+    println!("{name} is active={active}");
+    Ok(())
+}
+```
+
+A synchronous caller uses the same provider through `sync::Pool`, or wraps an async pool with
+`blocking::BlockingPool` when the `blocking` feature is enabled.
+
+**Read rows without copying the schema into your types.** `Row` owns detached values in ordinal
+order with provider-supplied names. `row.read::<T>("name")` reads by exact name;
+`row.read_at::<T>(index)` reads by zero-based ordinal; `Option<T>` is a matching typed SQL null.
+
+**Bound one batch across rows, bytes, and result sets.** `RowLimit` is a hard cap for the whole
+fetch. Providers fail with `Overflow` rather than truncate. The limit also covers rows a
+convenience call drains, not only the row it returns.
+
+**Page over one fetch, or turn paging into explicit requests.** `paging::PageStream` and
+`paging::RowStream` are views over a reader that was already fetched.
+`paging::multi::PageSourceStream` asks a caller-authored source for one page at a time.
+
+## 🚀 Quick start
+
+The session-level shape is the same for every provider. The example below takes a `&mut dyn
+Session`, so it compiles without choosing a driver; the SQLite program above shows the missing
+connection step.
+
+```rust,no_run
+use neotales_dbapi::{
+    DbError, DbType, Parameter, QueryOptions, RowLimit, Session, Value,
+};
+
+async fn first_active_name(session: &mut dyn Session) -> Result<Option<String>, DbError> {
+    let parameters = [Parameter::new(DbType::I64, Value::I64(7))?];
+    let mut reader = session
+        .fetch_async(
+            "SELECT active, name FROM users WHERE id = ?",
+            QueryOptions::new().bind_all(&parameters).limit(RowLimit::new(10, 4096)?),
+        )
+        .await?;
+
+    let mut name = None;
+    while let Some(row) = reader.next_row_async().await? {
+        // SQLite has no boolean storage class, so this column decodes as I64.
+        // PostgreSQL's BOOL column would decode as bool.
+        let active: i64 = row.read_at(0)?;
+        if active != 0 {
+            name = row.read("name")?;
+            break;
+        }
+    }
+
+    // Always finish: it drains the whole batch and surfaces a later statement error.
+    reader.finish_async().await?;
+    Ok(name)
+}
+```
+
+SQLite uses `?`; PostgreSQL uses `$1`, `$2`. Parameters are positional in slice order. The provider
+never rewrites SQL and rejects a placeholder/parameter count mismatch.
 
 A provider crate owns its public connection/pool constructor and configuration types, then exposes
 its implementation of the object-safe traits. The asynchronous traits are `Pool`, `Session`,
@@ -27,7 +162,7 @@ defaults may choose an enforceable timeout.
 > unqualified `provider.capabilities()` is ambiguous when both traits are in scope. Fully qualify
 > the family you mean:
 
-```rust
+```rust,no_run
 use neotales_dbapi::{Capabilities, Pool, sync};
 
 fn both_capabilities(provider: &(impl Pool + sync::Pool)) -> (Capabilities, Capabilities) {
@@ -37,40 +172,6 @@ fn both_capabilities(provider: &(impl Pool + sync::Pool)) -> (Capabilities, Capa
 
 `defaults` is also shared by the two pool families. Session, transaction, and reader methods
 differ by the `_async` suffix.
-
-## 🚀 Quick start
-
-```rust
-use neotales_dbapi::{
-    DbError, DbType, Parameter, QueryOptions, RowLimit, Session, Value,
-};
-
-async fn first_active_name(session: &mut dyn Session) -> Result<Option<String>, DbError> {
-    let parameters = [Parameter::new(DbType::I64, Value::I64(7))?];
-    let mut reader = session
-        .fetch_async(
-            "SELECT active, name FROM users WHERE id = ?",
-            QueryOptions::new().bind_all(&parameters).limit(RowLimit::new(10, 4096)?),
-        )
-        .await?;
-
-    let mut name = None;
-    while let Some(row) = reader.next_row_async().await? {
-        let active: bool = row.read_at(0)?;
-        if active {
-            name = row.read("name")?;
-            break;
-        }
-    }
-
-    // Always finish: it drains the whole batch and surfaces a later statement error.
-    reader.finish_async().await?;
-    Ok(name)
-}
-```
-
-SQLite uses `?`; PostgreSQL uses `$1`, `$2`. Parameters are positional in slice order. The provider
-never rewrites SQL and rejects a placeholder/parameter count mismatch.
 
 > **⚠️ Fetch is not proof of a read.** `INSERT ... RETURNING` can write. A dispatched statement whose
 > result cannot be established must surface `WriteOutcomeUnknown`, never a retryable transport
@@ -87,7 +188,7 @@ never rewrites SQL and rejects a placeholder/parameter count mismatch.
 - Missing names, duplicate names, wrong types, mismatched null types, and numeric overflow are
   distinct stable `ErrorKind` values.
 
-```rust
+```rust,no_run
 use neotales_dbapi::{DbError, DbType, Parameter, QueryOptions, RowLimit, Session, Value};
 
 async fn read_row(session: &mut dyn Session) -> Result<(), DbError> {
@@ -138,7 +239,7 @@ They do not take SQL, dispatch a second query, or add a limit of their own. The 
 `fetch_async` call still carries the parameters, timeout, telemetry, retry policy, and aggregate
 `RowLimit`.
 
-```rust
+```rust,no_run
 use futures_util::TryStreamExt;
 use neotales_dbapi::{
     DbError, QueryOptions, RowLimit, Session,
@@ -190,7 +291,7 @@ paging. The source authors the request, SQL, parameters, keyset/offset logic, an
 pager never rewrites SQL, retries, replays, prefetches, or spawns a task; it requests one page only
 when the stream is polled.
 
-```rust
+```rust,no_run
 use futures_util::TryStreamExt;
 use neotales_dbapi::{
     DbError,
@@ -306,7 +407,7 @@ All convenience calls finish the full batch, so a later statement error wins ove
 | `fetch_scalar_async` | `Value` — the first column of the exactly-one row |
 | `fetch_all_async` | `Vec<Row>` — every row and set in the bounded batch |
 
-```rust
+```rust,no_run
 use neotales_dbapi::{DbError, Pool, QueryOptions, RowLimit, Session, Value};
 
 async fn totals(
@@ -345,7 +446,7 @@ async fn totals(
 
 ## ✍️ Execute and scripts
 
-```rust
+```rust,no_run
 use neotales_dbapi::{DbError, DbType, Parameter, QueryOptions, Session, Value};
 
 async fn write(session: &mut dyn Session) -> Result<(), DbError> {
@@ -511,7 +612,7 @@ an unfinished reader follows the same connection-discard rule as the async reade
 method names stay unsuffixed (`execute`, `fetch`, `next_row`); asynchronous methods use the
 `_async` suffix, so both trait families can coexist on one provider type.
 
-```rust
+```rust,no_run
 use neotales_dbapi::{DbError, QueryOptions, RowLimit, sync};
 
 fn count(pool: &dyn sync::Pool) -> Result<i64, DbError> {
@@ -599,3 +700,6 @@ the fail-closed boundary above.
 
 The synchronous traits are runtime-neutral. The blocking adapter is an optional feature with a
 Tokio dependency; the default crate still contains no runtime, executor, or task.
+
+## Licence 📜
+MIT. See [LICENSE.md](LICENSE.md).

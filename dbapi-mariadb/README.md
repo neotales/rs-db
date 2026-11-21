@@ -1,5 +1,58 @@
 # neotales-dbapi-mariadb
 
+MariaDB 11.4 provider for `neotales-dbapi`, sharing the reviewed MySQL wire implementation.
+
+By [x0craft](https://github.com/x0craft).
+
+[![Neotales](https://github.com/neotales/brand/raw/main/assets/logo.png)](https://github.com/neotales/rs-db)
+
+<!-- badges: crates.io, docs.rs, CI. Add once the crate name and first version exist. -->
+
+## Install 📦
+
+```sh
+cargo add neotales-dbapi neotales-dbapi-mariadb
+```
+
+## What you can do 🔧
+
+**Connect with verified TLS and query with native `?` parameters.**
+
+```rust,no_run
+use std::time::Duration;
+use neotales_dbapi::{DbType, Parameter, Pool, QueryOptions, RowLimit, Value};
+use neotales_dbapi_mariadb::{MariaDbConfig, MariaDbPoolProvider};
+
+async fn query() -> Result<(), neotales_dbapi::DbError> {
+    let provider = MariaDbPoolProvider::connect(
+        MariaDbConfig::new("db.example.com", 3306, "app", "app")
+            .password("from-your-secret-store")
+            .max_connections(4)
+            .acquire_timeout(Duration::from_secs(3)),
+    )
+    .await?;
+    let params = [Parameter::new(DbType::I64, Value::I64(7))?];
+    let rows = provider
+        .fetch_all_async(
+            "SELECT name FROM users WHERE id = ?",
+            QueryOptions::new().bind_all(&params).limit(RowLimit::new(10, 4096)?),
+        )
+        .await?;
+    let _ = rows;
+    Ok(())
+}
+```
+
+**Get a concrete session when you own a named lock.** `acquire_mariadb_session` returns a session
+with `discard()`, so an unreleased `GET_LOCK` closes its physical connection instead of returning
+to the pool.
+
+**Keep MariaDB and MySQL separate.** This crate is tested against MariaDB 11.4 only; MySQL has its
+own provider and test lane.
+
+
+## Scope
+
 MariaDB implementation of the driver-neutral
 [`neotales-dbapi`](https://docs.rs/neotales-dbapi) contract. The public API does
 not expose `SQLx` or MySQL-driver types.
@@ -85,7 +138,7 @@ statement against the crate's digest-pinned MariaDB 11.4 container. It covers th
 single-tenant scans, typed parameters, one-row lookahead, exact page order, and request counts.
 `cargo test` stays fixture-free; select only this test with:
 
-```bash
+```sh
 cargo test -p neotales-dbapi-mariadb --test mariadb -- --ignored --exact mariadb_sql_page_source_contract
 ```
 
@@ -112,12 +165,12 @@ its character sets or SQL mode are unsafe to scan.
 
 ## Example
 
-```no_run
+```rust,no_run
 use std::time::Duration;
 use neotales_dbapi::{DbType, Parameter, Pool, QueryOptions, RowLimit, Value};
 use neotales_dbapi_mariadb::{MariaDbConfig, MariaDbPoolProvider};
 
-# async fn example() -> Result<(), neotales_dbapi::DbError> {
+async fn example() -> Result<(), neotales_dbapi::DbError> {
 let provider = MariaDbPoolProvider::connect(
     MariaDbConfig::new("db.example.com", 3306, "app", "app")
         .password("from-your-own-secret-store")
@@ -129,14 +182,14 @@ let rows = provider.fetch_all_async(
     "SELECT name FROM users WHERE id = ?",
     QueryOptions::new().bind_all(&parameters).limit(RowLimit::new(10, 4096)?),
 ).await?;
-# let _ = rows;
-# Ok(())
-# }
+let _ = rows;
+Ok(())
+}
 ```
 
 ## Testing
 
-```bash
+```sh
 cargo test -p neotales-dbapi-mariadb --all-targets
 dbapi-mariadb/tests/live.sh
 ```
@@ -151,7 +204,7 @@ rejection. `openssl` is required for the TLS test.
 
 For a single TLS investigation, select exactly one ignored test:
 
-```bash
+```sh
 cargo test -p neotales-dbapi-mariadb --test mariadb verified_tls_trusts_only_the_expected_ca_and_host -- --ignored --exact --nocapture
 ```
 
@@ -162,13 +215,13 @@ startup, port isolation, proxy setup, account readiness, and each TLS/query case
 have separate stages. Its current-thread panic hook discards payloads; it never
 prints container logs, SQL, certificates, credentials, or raw driver errors.
 
-## License
-
-MIT. See the workspace `LICENSE.md`.
-
 `USE` statements are rejected, including inside trusted scripts, to prevent
 database selection from leaking to another pool borrower. Executable comments
 and indirect execution are also rejected.
 
 Sessions require UTF-8 (`utf8mb4`) client, connection, and result character
 sets; invariant-changing `SET` statements are rejected before execution.
+
+## Licence 📜
+
+MIT. See [LICENSE.md](LICENSE.md).

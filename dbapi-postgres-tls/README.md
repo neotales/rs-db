@@ -1,4 +1,59 @@
-# Experimental fork-compatible PostgreSQL TLS
+# neotales-dbapi-postgres-tls
+
+Verified TLS adapter for the isolated `neotales-tokio-postgres` fork.
+
+By [x0craft](https://github.com/x0craft).
+
+[![Neotales](https://github.com/neotales/brand/raw/main/assets/logo.png)](https://github.com/neotales/rs-db)
+
+<!-- badges: crates.io, docs.rs, CI. Add once the crate name and first version exist. -->
+
+## Install 📦
+
+```sh
+cargo add neotales-dbapi-postgres-tls neotales-tokio-postgres
+```
+
+## What you can do 🔧
+
+**Connect with verify-full TLS and SCRAM channel binding.** The wrapper always requests TLS and
+checks the host name and certificate chain against explicit DER trust anchors, even when the
+supplied configuration asks for a weaker mode.
+
+```rust,no_run
+use std::{net::Ipv4Addr, time::Duration};
+use neotales_dbapi_postgres_tls::{connect, VerifiedTls};
+use neotales_tokio_postgres::Config;
+
+async fn connect_once(root_der: &[u8]) -> Result<(), Box<dyn std::error::Error>> {
+    let tls = VerifiedTls::new(&[root_der])?;
+    let mut config = Config::new();
+    config
+        .host("localhost")
+        .hostaddr(Ipv4Addr::LOCALHOST.into())
+        .user("app")
+        .dbname("app");
+    // Bound DNS/TCP, SSL negotiation, TLS, and startup as one deadline.
+    let (client, connection, cancel) =
+        tokio::time::timeout(Duration::from_secs(5), connect(&config, tls)).await??;
+    let worker = tokio::spawn(connection);
+    let _ = client;
+    drop(cancel);
+    worker.abort();
+    let _ = worker.await;
+    Ok(())
+}
+```
+
+**Understand the binding limit.** `SCRAM-SHA-256-PLUS` needs a certificate signature digest.
+Ed25519 has none; RSA-PSS does not expose the digest safely. Those certificates work with
+`prefer` as plain SCRAM and fail `require` explicitly.
+
+**Do not bypass the wrapper.** Calling the fork's `Config::connect` directly with a weak
+`sslmode` skips the verification and channel-binding policy this crate exists to enforce.
+
+
+## Scope
 
 This crate supplies the public quiet provider's OpenSSL-based adapter for the
 isolated `neotales-tokio-postgres` fork. The old SQLx provider is removed. The
@@ -106,3 +161,6 @@ self-signed Ed25519 server certificate, and
 `DBAPI_TLS_TEST_SCRAM_USER` / `DBAPI_TLS_TEST_SCRAM_PASSWORD` naming a SCRAM
 role. The RSA server certificate must be valid for `localhost`; the Ed25519 one
 must be a self-signed `localhost` certificate on the second port.
+
+## Licence 📜
+MIT. See [LICENSE.md](LICENSE.md).

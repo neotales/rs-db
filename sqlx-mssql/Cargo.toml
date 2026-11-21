@@ -21,7 +21,7 @@ autoexamples = false
 autotests = false
 autobenches = false
 description = "Core MSSQL driver for SQLx built on Microsoft's mssql-tds TDS implementation."
-documentation = "https://docs.rs/sqlx-mssql-rs"
+documentation = "https://docs.rs/neotales-sqlx-mssql"
 readme = "README.md"
 keywords = [
     "sqlx",

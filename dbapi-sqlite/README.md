@@ -1,10 +1,86 @@
 # neotales-dbapi-sqlite
 
-SQLite provider for `neotales-dbapi`. Configure it with `SqliteConfig` (file path, busy timeout,
-maximum connections, and durability policy), then open it with `SqlitePoolProvider::connect`. No
-SQLx type appears in the public API. `acquire_sqlite` returns a session implementing
-`ImmediateTransaction`, whose immediate begin issues `BEGIN IMMEDIATE` on that same exclusive
-connection.
+SQLite provider for `neotales-dbapi`, backed by `SQLx` with statement logging disabled.
+
+By [x0craft](https://github.com/x0craft).
+
+[![Neotales](https://github.com/neotales/brand/raw/main/assets/logo.png)](https://github.com/neotales/rs-db)
+
+<!-- badges: crates.io, docs.rs, CI. Add once the crate name and first version exist. -->
+
+## Install 📦
+
+```sh
+cargo add neotales-dbapi neotales-dbapi-sqlite
+cargo add tokio --features macros,rt-multi-thread
+```
+
+## What you can do 🔧
+
+**Open a file-backed database and run a transaction.** `SqlitePoolProvider::connect` opens the
+pool; `acquire_sqlite` returns an exclusive session with immediate-transaction support. The
+database file is created when absent. This is a complete program.
+
+```rust
+use neotales_dbapi::{DbError, Pool, QueryOptions, RowLimit};
+use neotales_dbapi_sqlite::{SqliteConfig, SqliteDurability, SqlitePoolProvider};
+
+#[tokio::main]
+async fn main() -> Result<(), DbError> {
+    let provider = SqlitePoolProvider::connect(
+        SqliteConfig::new("audit.sqlite")
+            .busy_timeout(std::time::Duration::from_secs(2))
+            .max_connections(4)
+            .durability(SqliteDurability::Durable),
+    )
+    .await?;
+
+    let mut session = provider.acquire_sqlite().await?;
+    let mut transaction = session.begin_immediate_async().await?;
+    transaction
+        .execute_async(
+            "CREATE TABLE IF NOT EXISTS audit (id INTEGER PRIMARY KEY, event TEXT NOT NULL)",
+            QueryOptions::new(),
+        )
+        .await?;
+    transaction.commit_async().await?;
+
+    let row = session
+        .fetch_one_async(
+            "SELECT count(*) AS n FROM audit",
+            QueryOptions::new().limit(RowLimit::new(1, 64)?),
+        )
+        .await?;
+    let count: i64 = row.read("n")?;
+    println!("{count} audit rows");
+    Ok(())
+}
+```
+
+Run the same connection shape without the durability policy in
+[`examples/connect_and_query.rs`](examples/connect_and_query.rs), or run this durable program as
+[`examples/durable_transaction.rs`](examples/durable_transaction.rs):
+
+```sh
+cargo run -p neotales-dbapi-sqlite --example connect_and_query
+cargo run -p neotales-dbapi-sqlite --example durable_transaction
+```
+
+**Choose the durability policy per pool.** `SqliteDurability::Inherit` changes nothing.
+`SqliteDurability::Durable` opens every connection with `journal_mode=WAL` and
+`synchronous=FULL`, reads both back, and revalidates them before every write, transaction,
+trusted script, and `COMMIT`.
+
+**Use a native blocking consumer.** The synchronous traits and `blocking::BlockingPool` work
+without changing the provider. Explicit per-statement timeouts are rejected with `Unsupported`;
+the configured busy timeout is a SQLite lock wait, not a statement deadline.
+
+## Scope
+
+Configure it with `SqliteConfig` (file path, busy timeout, maximum connections, and durability
+policy), then open it with `SqlitePoolProvider::connect`. No SQLx type appears in the public API.
+`acquire_sqlite` returns a session implementing `ImmediateTransaction`, whose immediate begin
+issues `BEGIN IMMEDIATE` on that same exclusive connection.
 
 SQLite inherits the portable no-statement-timeout default. Its configured busy timeout is a
 separate SQLite lock-wait setting, not a deadline for arbitrary SQL. Explicit per-statement
@@ -58,15 +134,21 @@ responsibility. It also does not change unrelated pool settings such as the busy
 connections, page cache, page size, foreign keys, or statement logging.
 
 ```rust
+use neotales_dbapi::DbError;
 use neotales_dbapi_sqlite::{SqliteConfig, SqliteDurability, SqlitePoolProvider};
 
-# async fn run() -> Result<(), neotales_dbapi::DbError> {
-let provider = SqlitePoolProvider::connect(
-    SqliteConfig::new("audit.sqlite").durability(SqliteDurability::Durable),
-).await?;
-# drop(provider);
-# Ok(())
-# }
+#[tokio::main]
+async fn main() -> Result<(), DbError> {
+    let provider = SqlitePoolProvider::connect(
+        SqliteConfig::new("audit.sqlite")
+            .durability(SqliteDurability::Durable),
+    )
+    .await?;
+
+    // Use the provider here. Dropping it closes its idle connections.
+    drop(provider);
+    Ok(())
+}
 ```
 
 Fetches detach all rows. The aggregate byte limit counts UTF-8 bytes in every returned column
@@ -189,3 +271,6 @@ syntax error echoes the offending token), but the provider converts them into
 `tests/lifecycle_logging.rs` captures every `tracing` event and `log` record
 under an unrestricted subscriber, with a stock SQLx pool as the positive
 control, and asserts these boundaries.
+
+## Licence 📜
+MIT. See [LICENSE.md](LICENSE.md).

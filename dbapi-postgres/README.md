@@ -1,4 +1,58 @@
-# Quiet PostgreSQL dbapi provider
+# neotales-dbapi-postgres
+
+Quiet PostgreSQL 17 provider for `neotales-dbapi`, with verified TLS and no `SQLx` dependency.
+
+By [x0craft](https://github.com/x0craft).
+
+[![Neotales](https://github.com/neotales/brand/raw/main/assets/logo.png)](https://github.com/neotales/rs-db)
+
+<!-- badges: crates.io, docs.rs, CI. Add once the crate name and first version exist. -->
+
+## Install 📦
+
+```sh
+cargo add neotales-dbapi neotales-dbapi-postgres
+```
+
+## What you can do 🔧
+
+**Open a verified-TLS pool and fetch a typed row.** The caller supplies DER trust anchors,
+a finite pool policy, and a profile with a statement ceiling and cancellation grace.
+
+```rust,no_run
+use std::time::Duration;
+use neotales_dbapi::{Pool, QueryOptions, RowLimit};
+use neotales_dbapi_postgres::{Config, PoolOptions, PostgresPool, Profile, VerifiedTls};
+
+async fn query(root_der: &[u8]) -> Result<(), Box<dyn std::error::Error>> {
+    let mut config = Config::new();
+    config.host("db.example.com").user("app").dbname("app");
+    let policy = PoolOptions::new(
+        4,
+        Profile::normal(Duration::from_secs(5), Duration::from_secs(1))?,
+        Duration::from_secs(60),
+    )?;
+    let pool = PostgresPool::new(config, VerifiedTls::new(&[root_der])?, policy)?;
+    let mut session = pool.acquire_async().await?;
+    let row = session
+        .fetch_one_async(
+            "SELECT 42::bigint AS answer",
+            QueryOptions::new().limit(RowLimit::new(1, 14)?),
+        )
+        .await?;
+    assert_eq!(row.get::<i64>("answer")?, 42);
+    Ok(())
+}
+```
+
+**Guard the data-connection count.** `PoolOptions` bounds client data socket owners, not
+PostgreSQL backends or work that continues after a disconnect.
+
+**Reconcile an unconfirmed commit.** A dispatched `COMMIT` without an authoritative result is
+`CommitOutcomeUnknown`, never success and never an automatic replay.
+
+
+## Scope
 
 `PostgresPool` now implements this checkout's `neotales-dbapi::Pool`, `Session`
 and borrowed `Transaction` traits over the quiet compiled transport. The old
@@ -175,7 +229,7 @@ Only this new page-source test is `#[ignore]`d; it does not make the rest of the
 The crate's other nonignored runtime tests still require the external PostgreSQL server described
 below. Selecting this test target skips the ignored case instead of running it:
 
-```bash
+```sh
 cargo test -p neotales-dbapi-postgres --test sql_page_source_live
 ```
 
@@ -226,3 +280,6 @@ tests also exercise 25 concurrent clients sharing three data connections, TTL,
 cleanup failure and no-runtime cleanup, cancellation, and independently
 observed unconfirmed writes/commit. Reviewed lower-level transport tests remain
 in place.
+
+## Licence 📜
+MIT. See [LICENSE.md](LICENSE.md).

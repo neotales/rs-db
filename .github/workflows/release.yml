@@ -59,6 +59,9 @@ jobs:
           -p neotales-migration-mssql -p neotales-migration-clickhouse
           -- --check
 
+      - name: Version consistency
+        run: python3 eng/version-consistency.py --verify
+
       - name: Clippy
         run: >-
           cargo clippy
@@ -94,59 +97,14 @@ jobs:
 
       # A crate whose internal dependency is not on crates.io yet cannot be
       # packaged for upload. That exact resolution error is expected before the
-      # first upload and on a releasing commit. Any compile, manifest or
-      # metadata error still fails this step.
+      # first upload and on a releasing commit. The classifier accepts only a
+      # workspace sibling at the shared version; an unpublished external crate,
+      # a wrong requirement, or a build/tarball failure fails this step.
+      - name: Verify the package preflight classifier
+        run: python3 eng/package-preflight.py --self-test
+
       - name: Package without publishing
-        run: |
-          set -euo pipefail
-
-          packages=(
-            neotales-klickhouse
-            neotales-libsql
-            neotales-tokio-postgres
-            neotales-dbapi
-            neotales-migration
-            neotales-sqlx-mssql
-            neotales-dbapi-d1
-            neotales-dbapi-sqlite
-            neotales-dbapi-sqlite-direct
-            neotales-dbapi-libsql
-            neotales-dbapi-mysql
-            neotales-dbapi-mariadb
-            neotales-dbapi-mssql
-            neotales-dbapi-clickhouse
-            neotales-dbapi-postgres-tls
-            neotales-dbapi-postgres
-            neotales-migration-sqlite
-            neotales-migration-libsql
-            neotales-migration-mysql
-            neotales-migration-mariadb
-            neotales-migration-mssql
-            neotales-migration-clickhouse
-            neotales-migration-postgres
-          )
-
-          failed=0
-          for package in "${packages[@]}"; do
-            echo "::group::cargo publish --dry-run -p $package"
-            set +e
-            output=$(cargo publish -p "$package" --dry-run --locked 2>&1)
-            status=$?
-            set -e
-            printf '%s\n' "$output"
-            echo "::endgroup::"
-            if [ "$status" -eq 0 ]; then
-              continue
-            fi
-            if printf '%s\n' "$output" | grep -F 'no matching package named' >/dev/null \
-              || printf '%s\n' "$output" | grep -F 'failed to select a version for the requirement' >/dev/null; then
-              echo "expected: $package cannot see an unpublished internal dependency yet"
-              continue
-            fi
-            echo "::error::$package failed its dry run for a reason other than an unpublished dependency"
-            failed=1
-          done
-          exit "$failed"
+        run: python3 eng/package-preflight.py
 
   version:
     name: tag matches the crate version
@@ -355,10 +313,21 @@ jobs:
                 echo "$package $version already uploaded; not publishing again"
                 return 0
               fi
-              if printf '%s\n' "$output" | grep -F 'failed to select a version for the requirement' >/dev/null \
-                || printf '%s\n' "$output" | grep -F 'no matching package named' >/dev/null \
-                || printf '%s\n' "$output" | grep -Eiq '429|rate limit|too many requests'; then
-                echo "retryable publish failure for $package (attempt $attempt); waiting 20s"
+              # Only an unpublished workspace sibling at this exact version is
+              # index lag. An unpublished external crate, a wrong requirement,
+              # or a build/tarball failure must stop the run, not retry 20 times.
+              classified=$(mktemp)
+              printf '%s\n' "$output" > "$classified"
+              if python3 eng/package-preflight.py --classify "$classified" \
+                --package "$package" --status "$status"; then
+                rm -f -- "$classified"
+                echo "retryable index lag for $package (attempt $attempt); waiting 20s"
+                sleep 20
+                continue
+              fi
+              rm -f -- "$classified"
+              if printf '%s\n' "$output" | grep -Eiq '429|rate limit|too many requests'; then
+                echo "rate-limited publish for $package (attempt $attempt); waiting 20s"
                 sleep 20
                 continue
               fi

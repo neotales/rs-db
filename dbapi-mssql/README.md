@@ -1,5 +1,58 @@
 # neotales-dbapi-mssql
 
+SQL Server provider for `neotales-dbapi`, built on the native TDS driver `mssql-tds`.
+
+By [x0craft](https://github.com/x0craft).
+
+[![Neotales](https://github.com/neotales/brand/raw/main/assets/logo.png)](https://github.com/neotales/rs-db)
+
+<!-- badges: crates.io, docs.rs, CI. Add once the crate name and first version exist. -->
+
+## Install 📦
+
+```sh
+cargo add neotales-dbapi neotales-dbapi-mssql
+```
+
+## What you can do 🔧
+
+**Connect with verified encryption and native `@P1` parameters.** `MssqlConfig::new` requires
+encryption and verifies the certificate chain and host name against system roots.
+
+```rust,no_run
+use neotales_dbapi::{Pool, QueryOptions, RowLimit};
+use neotales_dbapi_mssql::{MssqlConfig, MssqlPoolProvider};
+
+async fn query() -> Result<(), neotales_dbapi::DbError> {
+    let provider = MssqlPoolProvider::connect(MssqlConfig::new(
+        "sql.example.com",
+        1433,
+        "app",
+        "from-your-secret-store",
+        "app",
+    ))
+    .await?;
+    let rows = provider
+        .fetch_all_async(
+            "SELECT name FROM users",
+            QueryOptions::new().limit(RowLimit::new(10, 4096)?),
+        )
+        .await?;
+    let _ = rows;
+    Ok(())
+}
+```
+
+**Pin a private server certificate.** `MssqlTls::PinnedCertificate(path)` keeps verification while
+accepting an exact self-signed certificate. `MssqlTls::Insecure` is an explicit downgrade.
+
+**Use the restricted write grammar.** `execute_async` accepts one complete `INSERT ... VALUES` or
+restricted `UPDATE`; use a trusted script for other batches. The session scanner is conservative,
+not a SQL parser.
+
+
+## Scope
+
 SQL Server provider for [`neotales-dbapi`], built on the native TDS driver
 `sqlx-mssql-rs-core` (`mssql-tds`).
 
@@ -129,7 +182,7 @@ against the crate's digest-pinned SQL Server 2022 container. It covers the cross
 single-tenant scans, native `@P1` parameters, one-row lookahead, exact page order, and request
 counts. `cargo test` stays fixture-free; select only this test with:
 
-```bash
+```sh
 cargo test -p neotales-dbapi-mssql --test live -- --ignored --exact mssql_sql_page_source_contract
 ```
 
@@ -206,7 +259,7 @@ objects.
 
 ## Tests
 
-```bash
+```sh
 cargo test -p neotales-dbapi-mssql --all-targets
 dbapi-mssql/tests/live.sh
 sqlx-mssql/tests/live.sh
@@ -226,3 +279,6 @@ rejection, string/comment `GO` handling, and cancelled setup.
 
 The forked driver lane runs the exact ignored cancellation/pool-reuse test; its
 script fails before running anything unless `--list` reports that exact test.
+
+## Licence 📜
+MIT. See [LICENSE.md](LICENSE.md).

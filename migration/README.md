@@ -1,5 +1,53 @@
 # neotales-migration
 
+Driver-free SQL migration definitions, checksums, and planning.
+
+By [x0craft](https://github.com/x0craft).
+
+[![Neotales](https://github.com/neotales/brand/raw/main/assets/logo.png)](https://github.com/neotales/rs-db)
+
+<!-- badges: crates.io, docs.rs, CI. Add once the crate name and first version exist. -->
+
+## Install 📦
+
+```sh
+cargo add neotales-migration
+```
+
+## What you can do 🔧
+
+**Plan validated SQL without opening a database.** `Migrations::plan_up` returns SQL only after
+the complete history, checksums, binding fingerprint, and rollback preflight agree.
+
+```rust,no_run
+use neotales_migration::{Dialect, Identifier, Migration, Migrations, bind_identifiers};
+use std::collections::BTreeMap;
+
+fn plan() -> Result<(), Box<dyn std::error::Error>> {
+    let bindings = BTreeMap::from([("table".to_owned(), Identifier::new("events")?)]);
+    let (up, fingerprint) = bind_identifiers(
+        "CREATE TABLE {{table}} (id INTEGER)",
+        &bindings,
+        Dialect::Sqlite,
+    )?;
+    let migration = Migration::new(1, "events", up, Some("DROP TABLE "events"".into()))?;
+    let migrations = Migrations::new(vec![migration])?;
+    let history = migrations.validate_state(vec![], fingerprint.clone(), None)?;
+    let plan = migrations.plan_up(&history, &fingerprint)?;
+    assert_eq!(plan.len(), 1);
+    Ok(())
+}
+```
+
+**Detect edited definitions.** `Migration::new` pins the version, name, up SQL, down SQL, and
+baseline marker into a SHA-256 checksum. Changed history is rejected, not reconciled.
+
+**Keep execution yours.** This crate never connects, executes SQL, or stores a ledger. Backends
+such as `neotales-migration-sqlite` and `neotales-migration-postgres` own that boundary.
+
+
+## Scope
+
 Driver-free SQL migration definitions and planning. This crate never connects to
 a database and never executes SQL. The caller owns ledger reads, transactions,
 execution, and ledger writes.
@@ -220,6 +268,5 @@ limit, retains input order, and returns every success/error. It requires no
 runtime and spawns no workers. A future that never resolves necessarily prevents
 the result from completing; cancellation is the caller's responsibility.
 
-## License
-
-MIT. See the workspace `LICENSE.md`.
+## Licence 📜
+MIT. See [LICENSE.md](LICENSE.md).

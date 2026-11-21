@@ -61,6 +61,12 @@ jobs:
           -p neotales-migration-mssql -p neotales-migration-clickhouse
           -- --check
 
+      - name: Version consistency
+        run: python3 eng/version-consistency.py --verify
+
+      - name: Package preflight classifier
+        run: python3 eng/package-preflight.py --self-test
+
       - name: Clippy
         # Default features. The forks' optional upstream type features are an
         # explicit opt-in in the conformance harness, not part of this surface.
