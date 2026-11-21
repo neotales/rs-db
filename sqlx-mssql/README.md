@@ -96,7 +96,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 `MssqlConnection::connect()` accepts a standard `mssql://` URL:
 
 ```text
-mssql://user:password@host:port/database?params
+mssql://user:from-your-secret-store@host:port/database?params
 ```
 
 Port 1433 is assumed when omitted.
@@ -381,23 +381,23 @@ rolls back, and exercises each of the query macros. It reads
 ## Running Tests
 
 ```sh
-docker run -e "ACCEPT_EULA=Y" -e "MSSQL_SA_PASSWORD=MyPass" \
+docker run -e "ACCEPT_EULA=Y" -e "MSSQL_SA_PASSWORD=from-your-secret-store" \
   -p 1433:1433 -d mcr.microsoft.com/mssql/server:2022-latest
 
-DATABASE_URL="mssql://sa:MyPass@localhost:1433/master?trust_certificate=true" \
-  cargo test --workspace
+DATABASE_URL="mssql://sa:from-your-secret-store@localhost:1433/master?trust_certificate=true" \
+  cargo test -p neotales-sqlx-mssql --all-features
 ```
 
 The integration tests create tables under unique names and drop them again, so
 the suite is safe to run against a shared server. If `DATABASE_URL` is unset it
-defaults to `mssql://sa:Password1!@localhost:1433/master?trust_certificate=true`.
+defaults to `mssql://sa:from-your-secret-store@localhost:1433/master?trust_certificate=true`.
 
 Some tests are gated behind type features (`chrono`, `time`, `bstr`), so run the
 whole suite with everything enabled:
 
 ```sh
-DATABASE_URL="mssql://sa:MyPass@localhost:1433/master?trust_certificate=true" \
-  cargo test --workspace --all-features
+DATABASE_URL="mssql://sa:from-your-secret-store@localhost:1433/master?trust_certificate=true" \
+  cargo test -p neotales-sqlx-mssql --all-features --all-features
 ```
 ## Local fork notice
 
