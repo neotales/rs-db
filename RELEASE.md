@@ -170,10 +170,11 @@ The publish job uploads in dependency order and retries only the same
 verified index-lag condition, plus HTTP 429. Any other failure stops the run at
 that crate, so a real error cannot be hidden behind 20 retries.
 
-Registry-name availability for the `neotales-*` fork names was unverified at
-import time. Check ownership before the first upload. If a name is taken by
-someone else, stop: rename the package everywhere rather than publish under an
-unowned name.
+Registry-name availability was unverified at import time. A read-only crates.io
+API check on 2026-11-21 returned `404` for all 23 published names, so they were
+free at that moment. That is not a reservation: recheck immediately before the
+first upload. If a name is taken by someone else, stop and rename the package
+everywhere rather than publish under an unowned name.
 
 ## Later releases
 
